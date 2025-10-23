@@ -1,7 +1,10 @@
 analysis/BT1/results_BT1.pkl
 EXP_id03.pkl
+configs_debug.py
 .vscode/
 partidas_guardadas/
+chat/
+
 # images
 *.svg
 
