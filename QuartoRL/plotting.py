@@ -27,12 +27,15 @@ def plot_win_rate(
     FREQ_EPOCH_SAVING: int = 1,
     FOLDER_SAVE: str = "./",
     FIG_NAME=lambda epoch: f"{datetime.now().strftime('%Y%m%d_%H%M')}-win_rate_{epoch:04d}.svg",
+    DISPLAY_PLOT: bool = False,
 ):
     """Plot win rate over epochs for multiple rivals.
     Args:
         *args: Tuples of rival name and their corresponding win rates list.
         SMOOTHING_WINDOW (int): Window size for moving average smoothing. If -1, no smoothing is applied.
     """
+    if not DISPLAY_PLOT:
+        plt.ioff()  # Disable interactive mode
     plt.figure(1, figsize=(8, 6), clear=True)
     for rival_name, win_rates in args:
         plt.scatter(
@@ -63,8 +66,9 @@ def plot_win_rate(
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.draw()
-    plt.pause(0.001)
+    if DISPLAY_PLOT:
+        plt.draw()
+        plt.pause(0.001)
 
     # Save the figure at regular intervals
     if len(win_rates) % FREQ_EPOCH_SAVING == 0 and FREQ_EPOCH_SAVING != -1:
@@ -81,11 +85,14 @@ def plot_loss(
     FOLDER_SAVE: str = "./",
     FIG_NAME=lambda epoch: f"{datetime.now().strftime('%Y%m%d_%H%M')}-loss_{epoch:04d}.svg",
     SHOW_EPOCH_LINES: int = 500,
+    DISPLAY_PLOT: bool = False,
 ):
     """
     FREQ_EPOCH_SAVING: int if -1 no saving, else save every n epochs
     SHOW_EPOCH_LINES: int if >= N_ITERS show epoch lines
     """
+    if not DISPLAY_PLOT:
+        plt.ioff()  # Disable interactive mode
     epoch_values = loss_data["epoch_values"]
     loss_values = loss_data["loss_values"]
     N_ITERS = len(loss_values)
@@ -104,8 +111,9 @@ def plot_loss(
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.draw()
-    plt.pause(0.001)
+    if DISPLAY_PLOT:
+        plt.draw()
+        plt.pause(0.001)
 
     # Save the figure at regular intervals
     if len(epoch_values) % FREQ_EPOCH_SAVING == 0 and FREQ_EPOCH_SAVING != -1:

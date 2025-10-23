@@ -28,7 +28,7 @@ import numpy as np
 # ---- PARAMS ----
 logger.info("Imports done.")
 
-EXPERIMENT_NAME = "E02_win_rate"
+EXPERIMENT_NAME = "_E02_win_rate"
 CHECKPOINT_FOLDER = f"./CHECKPOINTS/{EXPERIMENT_NAME}/"
 
 # The bot at the end of each epoch will be evaluated against a limited number of rivals known as BASELINES.
@@ -308,6 +308,7 @@ for e in tqdm(
         FREQ_EPOCH_SAVING=FREQ_EPOCH_SAVING,
         FOLDER_SAVE=CHECKPOINT_FOLDER,
         SMOOTHING_WINDOW=SMOOTHING_WINDOW,
+        DISPLAY_PLOT=True,
     )
     # plot_contest_results(epochs_results)
     plot_loss(
@@ -315,6 +316,7 @@ for e in tqdm(
         FREQ_EPOCH_SAVING=FREQ_EPOCH_SAVING,
         FOLDER_SAVE=CHECKPOINT_FOLDER,
         SHOW_EPOCH_LINES=SHOW_EPOCH_LINES,
+        DISPLAY_PLOT=True,
     )
 
 
