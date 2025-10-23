@@ -36,16 +36,22 @@ bot_francis = F_bot(model_path=_f_Francis)
 ## Michael
 _f_Michael = "CHECKPOINTS//others//20250930_1010-EXP_id03_epoch_0017.pt"
 bot_Michael = Quarto_bot(model_path=_f_Michael, deterministic=False, temperature=0.1)
+_f_M2 = "CHECKPOINTS//others//20251006_2218-EXP_id03_epoch_0010.pt"
+bot_Michael2 = Quarto_bot(model_path=_f_M2, deterministic=False, temperature=0.1)
 # bot_Michael = Quarto_bot(model_path=_f_Michael, deterministic=True)
 
 ## Select bots to play
 bot_A = bot_good
 bot_A_m = "bot_good"
+# bot_A = bot_Michael2
+# bot_A_m = "bot_M2"
 
 # bot_B = bot_francis
 # bot_B_m = "bot_francis"
 bot_B = bot_Michael
 bot_B_m = "bot_Michael"
+# bot_B = bot_Michael2
+# bot_B_m = "bot_Michael2"
 
 N_MATCHES = 500
 VERBOSE = False

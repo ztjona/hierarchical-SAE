@@ -13,12 +13,13 @@ from models.CNN1 import QuartoCNN
 from QuartoRL import (
     gen_experience,
     run_contest,
-    plot_contest_results,
+    contest_2_win_rate,
     DQN_training_step,
+    plot_win_rate,
     plot_loss,
 )
 from tqdm.auto import tqdm
-import pprint
+from pprint import pprint
 import pickle
 from colorama import init, Fore, Style
 import matplotlib.pyplot as plt
@@ -27,29 +28,57 @@ import numpy as np
 # ---- PARAMS ----
 logger.info("Imports done.")
 
-EXPERIMENT_NAME = "BT_2"
+EXPERIMENT_NAME = "E02_win_rate"
 CHECKPOINT_FOLDER = f"./CHECKPOINTS/{EXPERIMENT_NAME}/"
 
-BATCH_SIZE = 256
+# The bot at the end of each epoch will be evaluated against a limited number of rivals known as BASELINES.
+BASELINES = [
+    {
+        "path": "CHECKPOINTS//EXP_id03//20250922_1247-EXP_id03_epoch_0009.pt",
+        "name": "bot_good",
+        "bot": Quarto_bot,
+        "params": {"deterministic": False, "temperature": 0.1},
+    },
+    {
+        "path": "CHECKPOINTS//EXP_id03//20250922_1247-EXP_id03_epoch_0000.pt",
+        "name": "bot_random",
+        "bot": Quarto_bot,
+        "params": {"deterministic": False, "temperature": 0.1},
+    },
+    # {
+    #     "path": "CHECKPOINTS//others//20250930_1010-EXP_id03_epoch_0017.pt",
+    #     "name": "bot_Michael",
+    #     "bot": Quarto_bot,
+    #     "params": {"deterministic": False, "temperature": 0.1},
+    # },
+    {
+        "path": "CHECKPOINTS//others//20251006_2218-EXP_id03_epoch_0010.pt",
+        "name": "bot_Michael2",
+        "bot": Quarto_bot,
+        "params": {"deterministic": False, "temperature": 0.1},
+    },
+]
+N_MATCHES_EVAL = 30  # number of matches to evaluate the bot at the end of each epoch for the selected BASELINES
+
+
+BATCH_SIZE = 512
 # When True, checks for winning in 2x2 squares. False, only in rows, columns and diagonals.
 mode_2x2 = True
-RIVALS_IN_TOURNAMENT = 100  # number of rivals to evaluate the bot against in the contest at the end of each epoch
-N_MATCHES_EVAL = 10  # number of matches to evaluate the bot at the end of each epoch for the selected previous rival
 
 # every epoch experience is generated with a new bot instance, models are saved at the end of each epoch
-EPOCHS = 100_000
+EPOCHS = 5_000
 
-MATCHES_PER_EPOCH = 300  # number self-play matches per epoch
+MATCHES_PER_EPOCH = 310  # number self-play matches per epoch
 # ~x10 of matches_per_epoch, used to generate experience
 STEPS_PER_EPOCH = 10 * MATCHES_PER_EPOCH
 # number of times the network is updated per epoch
 ITER_PER_EPOCH = STEPS_PER_EPOCH // BATCH_SIZE
 
-# ~x100 STEPS_PER_EPOCH, info from last epochs
-REPLAY_SIZE = 100 * STEPS_PER_EPOCH
+# ~EPOCHs x STEPS_PER_EPOCH, info from last epochs
+REPLAY_SIZE = 50 * STEPS_PER_EPOCH
 
 # update target network every n batches processed, ~x3/epoch
-N_BATCHS_2_UPDATE_TARGET = ITER_PER_EPOCH // 3
+N_BATCHS_2_UPDATE_TARGET = ITER_PER_EPOCH // 2
 
 # number of last states to consider in the experience generation at the beginning of training
 N_LAST_STATES_INIT: int = 2
@@ -60,16 +89,32 @@ N_LAST_STATES_FINAL: int = 16  # 16 is all states in 4x4 board
 TEMPERATURE_EXPLORE = 2  # view test of temperature
 
 # temperature for exploitation, lower values lead to more exploitation
-TEMPERATURE_EXPLOIT = 0.2
+TEMPERATURE_EXPLOIT = 0.1
 
-
+FREQ_EPOCH_SAVING = 100  # save model, figures every n epochs
+# in iters if >= N_ITERS show epoch lines in loss plot
+SHOW_EPOCH_LINES = ITER_PER_EPOCH * 20
+SMOOTHING_WINDOW = 10
 # ###########################
 MAX_GRAD_NORM = 1.0
 LR = 1e-4
-TAU = 0.005
+TAU = 0.01  # recommended value by CHATGPT
+# TAU = 0.005
 GAMMA = 0.99
 
 # from configs_debug import * # Uncomment to use debug configs
+
+# ###########################
+# Unpack baselines into rivals for evaluation
+# limit the number of rivals for evaluation, -1 means no limit
+RIVALS_IN_TOURNAMENT = -1
+RIVALS_NAMEs = [b["name"] for b in BASELINES]
+RIVALS_PATHs = [b["path"] for b in BASELINES]
+RIVALS_CLASS = BASELINES[0]["bot"]  # assumes all baselines have the same class TODO
+# assumes all baselines have the same params TODO
+RIVALS_PARAMs = BASELINES[0]["params"]
+
+win_rate: dict[str | int, list[float]] = {}  # list of win rates of epochs by rival
 
 # ###########################
 torch.manual_seed(50)
@@ -79,9 +124,10 @@ target_net = QuartoCNN()
 target_net.load_state_dict(policy_net.state_dict())
 
 CKPT_NAME_GEN = lambda epoch: f"{EXPERIMENT_NAME}_epoch_{epoch:04d}"
-_fcheckpoint_name = policy_net.export_model(CKPT_NAME_GEN(0), CHECKPOINT_FOLDER)
+policy_net.export_model(CKPT_NAME_GEN(0), CHECKPOINT_FOLDER)
+
 # list of file names by epoch
-checkpoints_files: list[str] = [_fcheckpoint_name]
+# checkpoints_files: list[str] = [_fcheckpoint_name]
 
 # ###########################
 replay_buffer = ReplayBuffer(
@@ -103,7 +149,7 @@ loss_data: dict[str, list[float | int]] = {
     "epoch_values": [],  # iter value at the end of each epoch
 }  # to track loss values during training
 # ###########################
-init(autoreset=True)
+init(autoreset=True)  # COLORAMA
 
 pbar = tqdm(
     total=EPOCHS * ITER_PER_EPOCH,
@@ -205,8 +251,8 @@ for e in tqdm(
     loss_data["epoch_values"].append(step_i)
     # Save the model at the end of each epoch
     _fname = CKPT_NAME_GEN(e + 1)
-    _f_fname = policy_net.export_model(_fname, checkpoint_folder=CHECKPOINT_FOLDER)
-    checkpoints_files.append(_f_fname)
+    policy_net.export_model(_fname, checkpoint_folder=CHECKPOINT_FOLDER)
+    # checkpoints_files.append(_f_fname)
 
     # We're also using a learning rate scheduler. Like the gradient clipping,
     # this is a nice-to-have but nothing necessary for PPO to work.
@@ -219,33 +265,57 @@ for e in tqdm(
 
     # Always False!
     # p1.DETERMINISTIC = False  # When True always repeat moves, is like only 1 game!
+    # assert not p1.DETERMINISTIC, "p1 bot should be non-deterministic for evaluation"
     p1.TEMPERATURE = TEMPERATURE_EXPLOIT
 
     contest_results = run_contest(
         player=p1,
-        rivals=checkpoints_files[:-1],  # rivals are the previous epochs
-        rival_class=Quarto_bot,
-        rival_options={
-            "deterministic": False,
-            "temperature": TEMPERATURE_EXPLOIT,
-        },
+        rivals=RIVALS_PATHs,
+        rival_class=RIVALS_CLASS,
+        rival_options=RIVALS_PARAMs,
         rivals_clip=RIVALS_IN_TOURNAMENT,  # limit the number of rivals for evaluation, -1 means no limit
+        rival_names=RIVALS_NAMEs,
         matches=N_MATCHES_EVAL,
         verbose=False,
         mode_2x2=mode_2x2,
         PROGRESS_MESSAGE=f"{Fore.MAGENTA}Running contest for epoch {e + 1}{Style.RESET_ALL}",
     )
     logger.info(f"Contest results after epoch {e + 1}")
-    logger.info(pprint.pformat(contest_results))
+    logger.info(pprint(contest_results))
+
+    for rival_name, wr in contest_2_win_rate(contest_results).items():
+        if rival_name not in win_rate:
+            win_rate[rival_name] = []
+        win_rate[rival_name].append(wr)
 
     # store results
     epochs_results.append(dict(contest_results))
-    with open(f"{EXPERIMENT_NAME}.pkl", "wb") as f:
-        pickle.dump({"epochs_results": epochs_results, "loss_values": loss_data}, f)
+    # ------- SAVE RESULTS -----------
+    if (e + 1) % FREQ_EPOCH_SAVING == 0:
+        with open(f"{EXPERIMENT_NAME}.pkl", "wb") as f:
+            pickle.dump(
+                {
+                    "epochs_results": epochs_results,
+                    "loss_values": loss_data,
+                    "win_rate": win_rate,
+                },
+                f,
+            )
 
     # ------- PLOT RESULTS -----------
-    plot_contest_results(epochs_results)
-    plot_loss(loss_data, FREQ_EPOCH_SAVING=200, FOLDER_SAVE=CHECKPOINT_FOLDER)
+    plot_win_rate(
+        *win_rate.items(),
+        FREQ_EPOCH_SAVING=FREQ_EPOCH_SAVING,
+        FOLDER_SAVE=CHECKPOINT_FOLDER,
+        SMOOTHING_WINDOW=SMOOTHING_WINDOW,
+    )
+    # plot_contest_results(epochs_results)
+    plot_loss(
+        loss_data,
+        FREQ_EPOCH_SAVING=FREQ_EPOCH_SAVING,
+        FOLDER_SAVE=CHECKPOINT_FOLDER,
+        SHOW_EPOCH_LINES=SHOW_EPOCH_LINES,
+    )
 
 
 logger.info("Training completed.")

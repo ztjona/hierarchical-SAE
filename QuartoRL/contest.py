@@ -17,12 +17,29 @@ from tqdm import tqdm
 from os import path
 
 
+def contest_2_win_rate(
+    contest_results: dict[str | int, dict[str, int]],
+) -> dict[str | int, float]:
+    """Convert contest results to win rates.
+    Args:
+        contest_results (dict): Contest results vs rival with wins, losses, and draws.
+    Returns:
+        dict: Win rates vs each rival.
+    """
+    win_rates: dict[str | int, float] = {}
+    for rival_name, results in contest_results.items():
+        total_games = results["wins"] + results["losses"] + results["draws"]
+
+        win_rates[rival_name] = (results["wins"] + results["draws"] * 0.5) / total_games
+    return win_rates
+
+
 # ####################################################################
 def run_contest(
     player: BotAI,
     rivals: list[str],
     rival_class: type[BotAI],
-    rival_names: list[str] = [],
+    rival_names: list[str | int] = [],
     rival_options: dict = {},
     matches: int = 100,
     rivals_clip: int = -1,
@@ -59,7 +76,7 @@ def run_contest(
     rivals_selected = {rival_names[i]: rivals[i] for i in selected}
 
     # index del rival: {"wins": 0, "losses": 0, "draws": 0}
-    results: dict[int, dict[str, int]] = defaultdict(
+    results: dict[int | str, dict[str, int]] = defaultdict(
         lambda: {"wins": 0, "losses": 0, "draws": 0}
     )
     for rival_name, rival_file in tqdm(rivals_selected.items(), desc=PROGRESS_MESSAGE):
