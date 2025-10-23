@@ -97,7 +97,7 @@ SHOW_EPOCH_LINES = ITER_PER_EPOCH * 20
 SMOOTHING_WINDOW = 10
 # ###########################
 MAX_GRAD_NORM = 1.0
-LR = 1e-4
+LR = 1e-3
 TAU = 0.01  # recommended value by CHATGPT
 # TAU = 0.005
 GAMMA = 0.99
