@@ -28,14 +28,17 @@ import numpy as np
 # ---- PARAMS ----
 logger.info("Imports done.")
 
-EXPERIMENT_NAME = "_E02_win_rate"
+STARTING_NET = "CHECKPOINTS//REF//20251023_1649-_E02_win_rate_epoch_0022.pt"
+# STARTING_NET = None  # Set to None to start with random weights
+EXPERIMENT_NAME = "_E03"
 CHECKPOINT_FOLDER = f"./CHECKPOINTS/{EXPERIMENT_NAME}/"
 
 # The bot at the end of each epoch will be evaluated against a limited number of rivals known as BASELINES.
 BASELINES = [
     {
-        "path": "CHECKPOINTS//EXP_id03//20250922_1247-EXP_id03_epoch_0009.pt",
-        "name": "bot_good",
+        # "path": "CHECKPOINTS//EXP_id03//20250922_1247-EXP_id03_epoch_0009.pt",
+        "path": "CHECKPOINTS//REF//20251023_1649-_E02_win_rate_epoch_0022.pt",
+        "name": "bot_good_WR_B",
         "bot": Quarto_bot,
         "params": {"deterministic": False, "temperature": 0.1},
     },
@@ -51,12 +54,12 @@ BASELINES = [
     #     "bot": Quarto_bot,
     #     "params": {"deterministic": False, "temperature": 0.1},
     # },
-    {
-        "path": "CHECKPOINTS//others//20251006_2218-EXP_id03_epoch_0010.pt",
-        "name": "bot_Michael2",
-        "bot": Quarto_bot,
-        "params": {"deterministic": False, "temperature": 0.1},
-    },
+    # {
+    #     "path": "CHECKPOINTS//others//20251006_2218-EXP_id03_epoch_0010.pt",
+    #     "name": "bot_Michael2",
+    #     "bot": Quarto_bot,
+    #     "params": {"deterministic": False, "temperature": 0.1},
+    # },
 ]
 N_MATCHES_EVAL = 30  # number of matches to evaluate the bot at the end of each epoch for the selected BASELINES
 
@@ -66,7 +69,7 @@ BATCH_SIZE = 512
 mode_2x2 = True
 
 # every epoch experience is generated with a new bot instance, models are saved at the end of each epoch
-EPOCHS = 5_000
+EPOCHS = 1_000
 
 MATCHES_PER_EPOCH = 310  # number self-play matches per epoch
 # ~x10 of matches_per_epoch, used to generate experience
@@ -120,10 +123,26 @@ win_rate: dict[str | int, list[float]] = {}  # list of win rates of epochs by ri
 torch.manual_seed(50)
 policy_net = QuartoCNN()
 target_net = QuartoCNN()
+
+# Load starting checkpoint if provided
+if STARTING_NET is not None:
+    logger.info(f"Loading starting checkpoint from: {STARTING_NET}")
+    try:
+        policy_net.load_state_dict(torch.load(STARTING_NET))
+        logger.info("Successfully loaded starting checkpoint")
+    except FileNotFoundError:
+        logger.error(f"Checkpoint file not found: {STARTING_NET}")
+        raise
+    except Exception as e:
+        logger.error(f"Error loading checkpoint: {e}")
+        raise
+else:
+    logger.info("Starting with random weights (no checkpoint provided)")
+
 # Set target net weights to policy net weights
 target_net.load_state_dict(policy_net.state_dict())
 
-CKPT_NAME_GEN = lambda epoch: f"{EXPERIMENT_NAME}_epoch_{epoch:04d}"
+CKPT_NAME_GEN = lambda epoch: f"{EXPERIMENT_NAME}_E_{epoch:04d}"
 policy_net.export_model(CKPT_NAME_GEN(0), CHECKPOINT_FOLDER)
 
 # list of file names by epoch
