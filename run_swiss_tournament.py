@@ -1,9 +1,29 @@
 # -*- coding: utf-8 -*-
 
-"""
-Python 3
-28 / 10 / 2025
-@author: z_tjona
+"""Swiss Tournament Runner for Quarto Bots
+
+Usage:
+    run_swiss_tournament.py <folder> [--rounds=<n>] [--single] [--no-mcmahon] [--deterministic] [--temperature=<t>]
+    run_swiss_tournament.py -h | --help
+
+Arguments:
+    <folder>                Path to checkpoint folder (e.g., CHECKPOINTS//E02_win_rate//)
+
+Options:
+    -h --help              Show this help message
+    --rounds=<n>           Number of tournament rounds [default: 200]
+    --single               Single Swiss (no color swap) [default: False]
+    --no-mcmahon           Disable McMahon initial scoring [default: False]
+    --deterministic        Use deterministic bot behavior [default: False]
+    --temperature=<t>      Temperature for bot decisions [default: 0.1]
+
+Examples:
+    run_swiss_tournament.py CHECKPOINTS//E02_win_rate//
+    run_swiss_tournament.py CHECKPOINTS//E02_win_rate// --rounds=100 --single
+    run_swiss_tournament.py CHECKPOINTS//EXP_id03// --rounds=50 --deterministic
+
+Author: z_tjona
+Date: 28 / 10 / 2025
 
 "I find that I don't understand things unless I try to program them."
 -Donald E. Knuth
@@ -11,21 +31,6 @@ Python 3
 "Either mathematics is too big for the human mind or the human mind is more than a machine."
 -Kurt Godël
 """
-
-
-# ----------------------------- MAIN CONFIGS --------------------------
-from bot.CNN_bot import Quarto_bot
-
-
-FOLDER_CHECKPOINTS = "CHECKPOINTS//E02_win_rate//"
-# FOLDER_CHECKPOINTS = "CHECKPOINTS//EXP_id03//"  # debugging
-BOTs_CLASS = Quarto_bot
-BOTs_PARAMs = {"deterministic": False, "temperature": 0.1}
-NUM_ROUNDS = 200
-# NUM_ROUNDS = 1000 # 5->10pm
-DOUBLE_SWISS = True  # Each bot plays once as player 1 and once as player 2
-MODE_McMahon = True  # Initial points based on estimated strength "Epoch"
-
 
 # ----------------------------- logging config --------------------------
 import logging
@@ -41,9 +46,11 @@ logging.basicConfig(
 logging.info(datetime.now())
 
 
-def run_swiss_tournament():
+def run_swiss_tournament(
+    folder_checkpoints, num_rounds, double_swiss, mode_mcmahon, bot_params
+):
     """
-    Runs a Swiss-system tournament between all checkpoints found in FOLDER_CHECKPOINTS.
+    Runs a Swiss-system tournament between all checkpoints found in folder_checkpoints.
 
     Swiss system pairs players with similar scores each round.
     Optional McMahon scoring gives initial points based on model epoch (estimated strength).
@@ -55,22 +62,20 @@ def run_swiss_tournament():
     import pickle
     from datetime import datetime
     from tqdm.auto import tqdm
-    import pandas as pd
-    import plotly.express as px
-    import plotly.graph_objs as go
+    from bot.CNN_bot import Quarto_bot
 
     # ----------------------------- LOAD CHECKPOINTS --------------------------
-    logging.info("Loading checkpoints from %s", FOLDER_CHECKPOINTS)
-    checkpoint_path = Path(FOLDER_CHECKPOINTS)
+    logging.info("Loading checkpoints from %s", folder_checkpoints)
+    checkpoint_path = Path(folder_checkpoints)
 
     if not checkpoint_path.exists():
-        logging.error("Checkpoint folder not found: %s", FOLDER_CHECKPOINTS)
+        logging.error("Checkpoint folder not found: %s", folder_checkpoints)
         return
 
     checkpoint_files = sorted(list(checkpoint_path.glob("*.pt")))
 
     if len(checkpoint_files) == 0:
-        logging.error("No checkpoint files found in %s", FOLDER_CHECKPOINTS)
+        logging.error("No checkpoint files found in %s", folder_checkpoints)
         return
 
     logging.info("Found %d checkpoint files", len(checkpoint_files))
@@ -103,12 +108,12 @@ def run_swiss_tournament():
     # ----------------------------- SWISS TOURNAMENT --------------------------
     results_history = []  # Store all match results
 
-    for round_num in tqdm(range(1, NUM_ROUNDS + 1)):
+    for round_num in tqdm(range(1, num_rounds + 1)):
         logging.info("=" * 60)
-        logging.info("ROUND %d / %d", round_num, NUM_ROUNDS)
+        logging.info("ROUND %d / %d", round_num, num_rounds)
         logging.info("=" * 60)
 
-        if MODE_McMahon and round_num == 1:
+        if mode_mcmahon and round_num == 1:
             # Initial scoring based on epoch
             logging.info("Applied McMahon initial scoring based on epoch")
             bots_info.sort(key=lambda x: -x["epoch"])
@@ -151,19 +156,9 @@ def run_swiss_tournament():
             bot1_info = bots_info[idx1]
             bot2_info = bots_info[idx2]
 
-            # logging.info(
-            #     "Match %d/%d: %s (score: %.1f) vs %s (score: %.1f)",
-            #     pair_idx + 1,
-            #     len(pairings),
-            #     bot1_info["name"],
-            #     bot1_info["score"],
-            #     bot2_info["name"],
-            #     bot2_info["score"],
-            # )
-
             # Create bot instances
-            bot1 = BOTs_CLASS(model_path=bot1_info["path"], **BOTs_PARAMs)
-            bot2 = BOTs_CLASS(model_path=bot2_info["path"], **BOTs_PARAMs)
+            bot1 = Quarto_bot(model_path=bot1_info["path"], **bot_params)
+            bot2 = Quarto_bot(model_path=bot2_info["path"], **bot_params)
 
             # Play first game
             _, win_rate1 = play_games(
@@ -207,7 +202,7 @@ def run_swiss_tournament():
             bot2_info["matches_played"] += 1
 
             # Double Swiss: play second game with colors swapped
-            if DOUBLE_SWISS:
+            if double_swiss:
                 _, win_rate2 = play_games(
                     matches=1,
                     player1=bot2,
@@ -295,10 +290,11 @@ def run_swiss_tournament():
 
     tournament_data = {
         "config": {
-            "num_rounds": NUM_ROUNDS,
-            "double_swiss": DOUBLE_SWISS,
-            "mcmahon": MODE_McMahon,
-            "folder": FOLDER_CHECKPOINTS,
+            "num_rounds": num_rounds,
+            "double_swiss": double_swiss,
+            "mcmahon": mode_mcmahon,
+            "folder": folder_checkpoints,
+            "bot_params": bot_params,
         },
         "final_standings": final_standings,
         "match_results": results_history,
@@ -316,4 +312,38 @@ def run_swiss_tournament():
 
 # ----------------------------- MAIN EXECUTION --------------------------
 if __name__ == "__main__":
-    run_swiss_tournament()
+    from docopt import docopt
+
+    args = docopt(__doc__)
+
+    # Parse arguments
+    folder_checkpoints = args["<folder>"]
+    num_rounds = int(args["--rounds"])
+    double_swiss = not args["--single"]
+    mode_mcmahon = not args["--no-mcmahon"]
+    deterministic = args["--deterministic"]
+    temperature = float(args["--temperature"])
+
+    # Bot parameters
+    bot_params = {"deterministic": deterministic, "temperature": temperature}
+
+    # Log configuration
+    logging.info("=" * 60)
+    logging.info("SWISS TOURNAMENT CONFIGURATION")
+    logging.info("=" * 60)
+    logging.info("Checkpoint Folder: %s", folder_checkpoints)
+    logging.info("Number of Rounds: %d", num_rounds)
+    logging.info("Double Swiss: %s", double_swiss)
+    logging.info("McMahon Scoring: %s", mode_mcmahon)
+    logging.info("Bot Deterministic: %s", deterministic)
+    logging.info("Bot Temperature: %.2f", temperature)
+    logging.info("=" * 60)
+
+    # Run tournament
+    run_swiss_tournament(
+        folder_checkpoints=folder_checkpoints,
+        num_rounds=num_rounds,
+        double_swiss=double_swiss,
+        mode_mcmahon=mode_mcmahon,
+        bot_params=bot_params,
+    )
