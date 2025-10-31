@@ -1,0 +1,31 @@
+[32m[32m[41m[10-30 17:34:43][49m[INFO][47m[trainRL_BATCH_SIZE2048.py][49m Starting. Importing...[0m
+[32m[32m[41m[10-30 17:35:10][49m[INFO][47m[trainRL_BATCH_SIZE2048.py][49m Imports done.[0m
+[32m[32m[41m[10-30 17:35:10][49m[INFO][47m[trainRL_BATCH_SIZE2048.py][49m Loading starting checkpoint from: CHECKPOINTS//REF//20251023_1649-_E02_win_rate_epoch_0022.pt[0m
+[32m[32m[41m[10-30 17:35:10][49m[INFO][47m[trainRL_BATCH_SIZE2048.py][49m Successfully loaded starting checkpoint[0m
+[32m[32m[41m[10-30 17:35:10][49m[INFO][47m[trainRL_BATCH_SIZE2048.py][49m Hyperparameters loaded.[0m
+[32m[32m[41m[10-30 17:35:10][49m[INFO][47m[trainRL_BATCH_SIZE2048.py][49m Starting training...[0m
+[32m[32m[41m[10-30 17:35:10][49m[INFO][47m[trainRL_BATCH_SIZE2048.py][49m Using n_last_states=2 for epoch 1[0m
+[33m[32m[41m[10-30 17:35:16][49m[WARNING][47m[trainRL_BATCH_SIZE2048.py][49m Not enough data to sample a full batch. Expected 2048, got 620[0m
+[32m[32m[41m[10-30 17:35:16][49m[INFO][47m[trainRL_BATCH_SIZE2048.py][49m Current learning rate: 9.9999755727492e-05[0m
+[32m[32m[41m[10-30 17:35:17][49m[INFO][47m[trainRL_BATCH_SIZE2048.py][49m Contest results after epoch 1[0m
+defaultdict(<function run_contest.<locals>.<lambda> at 0x0000026418653BA0>,
+            {'bot_good_WR_B': {'draws': 0, 'losses': 16, 'wins': 14},
+             'bot_random': {'draws': 0, 'losses': 11, 'wins': 19}})
+[32m[32m[41m[10-30 17:35:17][49m[INFO][47m[trainRL_BATCH_SIZE2048.py][49m None[0m
+[32m[32m[41m[10-30 17:35:18][49m[INFO][47m[trainRL_BATCH_SIZE2048.py][49m Using n_last_states=2 for epoch 2[0m
+[33m[32m[41m[10-30 17:35:24][49m[WARNING][47m[trainRL_BATCH_SIZE2048.py][49m Not enough data to sample a full batch. Expected 2048, got 1240[0m
+[32m[32m[41m[10-30 17:35:24][49m[INFO][47m[trainRL_BATCH_SIZE2048.py][49m Current learning rate: 9.999902291237878e-05[0m
+[32m[32m[41m[10-30 17:35:25][49m[INFO][47m[trainRL_BATCH_SIZE2048.py][49m Contest results after epoch 2[0m
+defaultdict(<function run_contest.<locals>.<lambda> at 0x0000026418A696C0>,
+            {'bot_good_WR_B': {'draws': 0, 'losses': 13, 'wins': 17},
+             'bot_random': {'draws': 0, 'losses': 8, 'wins': 22}})
+[32m[32m[41m[10-30 17:35:25][49m[INFO][47m[trainRL_BATCH_SIZE2048.py][49m None[0m
+[32m[32m[41m[10-30 17:35:25][49m[INFO][47m[trainRL_BATCH_SIZE2048.py][49m Using n_last_states=2 for epoch 3[0m
+[33m[32m[41m[10-30 17:35:30][49m[WARNING][47m[trainRL_BATCH_SIZE2048.py][49m Not enough data to sample a full batch. Expected 2048, got 1860[0m
+[32m[32m[41m[10-30 17:35:30][49m[INFO][47m[trainRL_BATCH_SIZE2048.py][49m Current learning rate: 9.999780156189302e-05[0m
+[32m[32m[41m[10-30 17:35:31][49m[INFO][47m[trainRL_BATCH_SIZE2048.py][49m Contest results after epoch 3[0m
+defaultdict(<function run_contest.<locals>.<lambda> at 0x0000026418A1E0C0>,
+            {'bot_good_WR_B': {'draws': 0, 'losses': 13, 'wins': 17},
+             'bot_random': {'draws': 0, 'losses': 13, 'wins': 17}})
+[32m[32m[41m[10-30 17:35:31][49m[INFO][47m[trainRL_BATCH_SIZE2048.py][49m None[0m
+[32m[32m[41m[10-30 17:35:31][49m[INFO][47m[trainRL_BATCH_SIZE2048.py][49m Using n_last_states=2 for epoch 4[0m
