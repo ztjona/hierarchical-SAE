@@ -69,7 +69,8 @@ class NN_abstract(ABC, torch.nn.Module):
         """
         model = cls()
 
-        model.load_state_dict(torch.load(weights_path))
+        # specifically load only weights
+        model.load_state_dict(torch.load(weights_path, weights_only=True))
 
         return model
 
