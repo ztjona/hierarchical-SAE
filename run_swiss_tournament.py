@@ -3,7 +3,7 @@
 """Swiss Tournament Runner for Quarto Bots
 
 Usage:
-    run_swiss_tournament.py <folder> [--rounds=<n>] [--single] [--no-mcmahon] [--deterministic] [--temperature=<t>]
+    run_swiss_tournament.py <folder> [--rounds=<n>] [--single] [--no-mcmahon] [--deterministic] [--temperature=<t>] [--results-file=<path>]
     run_swiss_tournament.py -h | --help
 
 Arguments:
@@ -16,11 +16,13 @@ Options:
     --no-mcmahon           Disable McMahon initial scoring [default: False]
     --deterministic        Use deterministic bot behavior [default: False]
     --temperature=<t>      Temperature for bot decisions [default: 0.1]
+    --results-file=<path>  Output file for results (default: swiss_tournament_<timestamp>.pkl)
 
 Examples:
     run_swiss_tournament.py CHECKPOINTS//E02_win_rate//
     run_swiss_tournament.py CHECKPOINTS//E02_win_rate// --rounds=100 --single
     run_swiss_tournament.py CHECKPOINTS//EXP_id03// --rounds=50 --deterministic
+    run_swiss_tournament.py CHECKPOINTS//E02_win_rate// --results-file=my_results.pkl
 
 Author: z_tjona
 Date: 28 / 10 / 2025
@@ -47,7 +49,12 @@ logging.info(datetime.now())
 
 
 def run_swiss_tournament(
-    folder_checkpoints, num_rounds, double_swiss, mode_mcmahon, bot_params
+    folder_checkpoints,
+    num_rounds,
+    double_swiss,
+    mode_mcmahon,
+    bot_params,
+    results_file=None,
 ):
     """
     Runs a Swiss-system tournament between all checkpoints found in folder_checkpoints.
@@ -84,7 +91,7 @@ def run_swiss_tournament(
     # Extract epoch numbers from filenames for McMahon scoring
     def extract_epoch(filename):
         """Extract epoch number from checkpoint filename"""
-        match = re.search(r"epoch[_\s]+(\d+)", filename.stem, re.IGNORECASE)
+        match = re.search(r"E[_\s]+(\d+)", filename.stem, re.IGNORECASE)
         return int(match.group(1)) if match else 0
 
     # Create bot information
@@ -286,7 +293,10 @@ def run_swiss_tournament(
 
     # ----------------------------- SAVE RESULTS --------------------------
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    results_file = f"swiss_tournament_{timestamp}.pkl"
+    if results_file is None:
+        results_file = f"swiss_tournament_{timestamp}.pkl"
+    elif not results_file.endswith(".pkl"):
+        results_file = f"{results_file}.pkl"
 
     tournament_data = {
         "config": {
@@ -323,6 +333,7 @@ if __name__ == "__main__":
     mode_mcmahon = not args["--no-mcmahon"]
     deterministic = args["--deterministic"]
     temperature = float(args["--temperature"])
+    results_file = args["--results-file"]
 
     # Bot parameters
     bot_params = {"deterministic": deterministic, "temperature": temperature}
@@ -337,6 +348,7 @@ if __name__ == "__main__":
     logging.info("McMahon Scoring: %s", mode_mcmahon)
     logging.info("Bot Deterministic: %s", deterministic)
     logging.info("Bot Temperature: %.2f", temperature)
+    logging.info("Results File: %s", results_file if results_file else "auto-generated")
     logging.info("=" * 60)
 
     # Run tournament
@@ -346,4 +358,5 @@ if __name__ == "__main__":
         double_swiss=double_swiss,
         mode_mcmahon=mode_mcmahon,
         bot_params=bot_params,
+        results_file=results_file,
     )

@@ -12,9 +12,9 @@ Python 3
 "Either mathematics is too big for the human mind or the human mind is more than a machine."
 -Kurt Godël
 """
-EXPERIMENT_NAME = "E03"
-PARAM_ITERATE = "BATCH_SIZE"
-PARAMS = [32, 64, 512, 78]
+EXPERIMENT_NAME = "E04b"
+PARAM_ITERATE = "N_LAST_STATES_FINAL"
+PARAMS = [2, 4, 8, 12, 16]
 
 # Path to the original training script
 TRAIN_SCRIPT = "trainRL.py"
@@ -59,7 +59,7 @@ def create_training_file(param_value, experiment_suffix):
 
     # Read and modify the training script
     modified_content = modify_param_in_file(TRAIN_SCRIPT, PARAM_ITERATE, param_value)
-
+    print(f"Modified {PARAM_ITERATE} to {modified_content}.")
     # Also modify EXPERIMENT_NAME to include the parameter value
     import re
 
@@ -117,7 +117,9 @@ def main():
     for idx, param_value in enumerate(PARAMS, 1):
         experiment_suffix = f"{PARAM_ITERATE}{param_value}"
         exp_name = f"{EXPERIMENT_NAME}_{experiment_suffix}"
-        print(f"python trainRL_{experiment_suffix}.py | tee {exp_name}.log &")
+        print(f"python trainRL_{experiment_suffix}.py 1> {exp_name}.log &")
+        if idx == len(PARAMS):
+            print(f"python trainRL_{experiment_suffix}.py | tee {exp_name}.log &")
     print(f"{'=' * 80}\n")
 
 

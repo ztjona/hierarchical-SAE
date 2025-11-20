@@ -86,7 +86,7 @@ N_BATCHS_2_UPDATE_TARGET = ITER_PER_EPOCH // 2
 # number of last states to consider in the experience generation at the beginning of training
 N_LAST_STATES_INIT: int = 2
 # number of last states to consider in the experience generation at the end of training. -1 means all states
-N_LAST_STATES_FINAL: int = 16  # 16 is all states in 4x4 board
+N_LAST_STATES_FINAL = 16  # 16 is all states in 4x4 board
 
 # temperature for exploration, higher values lead to more exploration
 TEMPERATURE_EXPLORE = 2  # view test of temperature
@@ -100,7 +100,8 @@ SHOW_EPOCH_LINES = ITER_PER_EPOCH * 20
 SMOOTHING_WINDOW = 10
 # ###########################
 MAX_GRAD_NORM = 1.0
-LR = 1e-4
+LR = 5e-5  # initial
+LR_F = 1e-5
 TAU = 0.01  # recommended value by CHATGPT
 # TAU = 0.005
 GAMMA = 0.99
@@ -157,7 +158,7 @@ replay_buffer = ReplayBuffer(
 # ###########################
 optimizer = optim.AdamW(policy_net.parameters(), lr=LR, amsgrad=True)
 
-scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, EPOCHS, eta_min=1e-6)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, EPOCHS, eta_min=LR_F)
 
 # The Huber loss acts like the mean squared error when the error is small, but like the mean absolute error when the error is large - this makes it more robust to outliers when the estimates of Q are very noisy.
 loss_fcn = nn.SmoothL1Loss()
