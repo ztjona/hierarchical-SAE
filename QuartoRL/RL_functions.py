@@ -42,6 +42,7 @@ def convert_2_state_action_reward(match_data, REWARD_FUNCTION_TYPE: str = "propa
             - board_next_state: Board state after action (str).
             - piece_state: Piece given by opponent in previous turn (int).
             - piece_next_state: Piece given to opponent (int).
+            - mov_description: Description of the move (str).
             - action_place: Position index to place the piece (int).
             - action_sel: Piece index to give to opponent (int).
             - reward: Reward for the state (int/float).
@@ -79,8 +80,16 @@ def convert_2_state_action_reward(match_data, REWARD_FUNCTION_TYPE: str = "propa
 
     reward = []
     done = []
+    mov_description: list[str] = []
 
     for i, move in enumerate(m_h):
+        # --- INDEX
+        if move["action"] == "selected":
+            mov_description.append(f"{i}|{move['action']}|{move['player_pos']}")
+
+        elif move["action"] == "placed":
+            pass
+
         # --- BOARD
         if move["action"] == "selected":
             pass
@@ -111,11 +120,15 @@ def convert_2_state_action_reward(match_data, REWARD_FUNCTION_TYPE: str = "propa
 
     assert len(piece_state) == len(piece_next_state) + 1
 
+    if len(mov_description) != len(board_state):
+        mov_description.append(f"{i}|{move['action']}|{move['player_pos']}")
+
     action_sel.append(-1)  # no piece selected after the last move
     piece_next_state.append(-1)  # no piece given after the last move
 
     _num_states = len(piece_state)
     _num_non_terminal_states = _num_states - 1
+
     # --- REWARD
     match match_data["result"]:
         case "Player 1":
@@ -154,6 +167,7 @@ def convert_2_state_action_reward(match_data, REWARD_FUNCTION_TYPE: str = "propa
             # but board_state and board_next_state are str
             "board_state": board_state,
             "board_next_state": board_next_state,
+            "mov_description": mov_description,
             # the rest are int
             "piece_state": piece_state,
             "piece_next_state": piece_next_state,
@@ -177,7 +191,8 @@ def gen_experience(
     PROGRESS_MESSAGE: str = "Generating experience",
     mode_2x2: bool = False,
     REWARD_FUNCTION_TYPE: str = "propagate",
-) -> TensorDict:
+    COLLECT_BOARDS: bool = False,
+) -> TensorDict | tuple[TensorDict, list[Board]]:
     """
     Generates experience by having two bots play against each other. The experience is returned as a TensorDict.
     ## Parameters
@@ -197,6 +212,8 @@ def gen_experience(
         If True, activates the 2x2 victory mode. Default is False.
     ``REWARD_FUNCTION_TYPE``: str
         Type of reward function to use. Options are "propagate", "final", "discount". Default is "propagate".
+    ``COLLECT_BOARDS``: bool
+        If True, collects the board states during the matches. Default is False.
 
     ## Returns
     ```
@@ -213,6 +230,8 @@ def gen_experience(
         batch_size=torch.Size([400]),
         device=cpu,
         is_shared=False)
+    list[Board Board next state] [OPTIONAL] if COLLECT_BOARDS is True
+
     ```
     """
     logger.debug("Generating experience...")
@@ -231,6 +250,10 @@ def gen_experience(
     logger.debug(f"Generated experience. Matches played: {number_of_matches}.")
 
     exp_all = []
+
+    if COLLECT_BOARDS:
+        boards: list[tuple[Board, Board]] = []
+
     for match_data in matches_data:
         exp = convert_2_state_action_reward(
             match_data, REWARD_FUNCTION_TYPE=REWARD_FUNCTION_TYPE
@@ -242,6 +265,20 @@ def gen_experience(
         #         f"n_last_states ({n_last_states}) is greater than the number of states in the match ({exp.shape[0]}). Using all states."
         #     )
         exp_all.append(exp)
+
+        if COLLECT_BOARDS:
+            # Collect final boards
+            for _, b in exp.iterrows():
+                boards.append(
+                    (
+                        Board.serialized_2_board(
+                            b["board_state"],
+                            name=f"{b['mov_description']}R={b['reward']}",
+                        ),
+                        Board.serialized_2_board(b["board_next_state"], name="sad"),
+                    )
+                )
+
     p_all = pd.concat(exp_all, ignore_index=True)  # just for easy concat
 
     logger.debug(f"Total states collected: {p_all.shape[0]}")
@@ -278,7 +315,10 @@ def gen_experience(
         batch_size=[p_all.shape[0]],
         device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
     )
-    return experience
+    if COLLECT_BOARDS:
+        return experience, boards
+    else:
+        return experience
 
 
 def DQN_training_step(
