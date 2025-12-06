@@ -23,7 +23,6 @@ from pprint import pprint
 import pickle
 from colorama import init, Fore, Style
 import matplotlib.pyplot as plt
-import numpy as np
 
 # ---- PARAMS ----
 logger.info("Imports done.")
@@ -266,6 +265,7 @@ for e in tqdm(
                     key
                 ] * TAU + target_net_state_dict[key] * (1 - TAU)
             target_net.load_state_dict(target_net_state_dict)
+            target_net.eval()  # Ensure target network stays in eval mode
 
     # ------- END OF EPOCH -------
     loss_data["epoch_values"].append(step_i)
