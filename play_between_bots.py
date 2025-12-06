@@ -14,6 +14,7 @@ Python 3
 from quartopy import play_games
 from bot.CNN_bot import Quarto_bot
 from bot.CNN_F_bot import Quarto_bot as F_bot
+from models.CNN_fdec import QuartoCNNExtended
 
 ## CNN1
 # medio malo
@@ -24,10 +25,20 @@ _fgood = "CHECKPOINTS//EXP_id03//20250922_1247-EXP_id03_epoch_0009.pt"
 _fgood2 = "CHECKPOINTS//E02_win_rate//20251023_1326-E02_win_rate_epoch_0031.pt"
 _fgood2B = "CHECKPOINTS//REF//20251023_1649-_E02_win_rate_epoch_0022.pt"
 
+_fFrancis_dec = (
+    "CHECKPOINTS//Francis//20251204_0932-ba_increasing_n_last_states_epoch_0505.pt"
+)
+
 bot_malo = Quarto_bot(model_path=_f, deterministic=False, temperature=0.1)
 bot_rand = Quarto_bot(model_path=_f2, deterministic=False, temperature=0.1)
 bot_good = Quarto_bot(model_path=_fgood, deterministic=False, temperature=0.1)
 bot_good2B = Quarto_bot(model_path=_fgood2B, deterministic=False, temperature=0.1)
+bot_Francis_dec = Quarto_bot(
+    model_path=_fFrancis_dec,
+    model_class=QuartoCNNExtended,
+    deterministic=False,
+    temperature=0.1,
+)
 ## CNNF
 _f_Francis = (
     "CHECKPOINTS//others//20251013_1851-ba_increasing_n_last_states_epoch_1000.pt"
@@ -52,8 +63,10 @@ bot_A_m = "bot_good"
 # bot_B_m = "bot_francis"
 # bot_B = bot_Michael
 # bot_B_m = "bot_Michael"
-bot_B = bot_good2B
-bot_B_m = "bot_GoodE02_WR_base"
+# bot_B = bot_good2B
+# bot_B_m = "bot_GoodE02_WR_base"
+bot_B = bot_Francis_dec
+bot_B_m = "bot_Francis_dec"
 # bot_B = bot_Michael2
 # bot_B_m = "bot_Michael2"
 
