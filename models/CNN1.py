@@ -20,7 +20,6 @@ import torch.nn.functional as F
 import numpy as np
 
 # ----------------------------- logging --------------------------
-from utils.logger import logger
 
 
 class QuartoCNN(NN_abstract):
@@ -98,58 +97,3 @@ class QuartoCNN(NN_abstract):
         logits_piece = self.fc2_piece(x_qav)
         qav_piece = F.tanh(logits_piece)
         return qav_board, qav_piece
-
-    def predict(
-        self,
-        x_board: torch.Tensor | np.ndarray,
-        x_piece: torch.Tensor | np.ndarray,
-        TEMPERATURE: float = 1.0,
-        DETERMINISTIC: bool = True,
-    ):
-        """
-        Predicts the preferred order of the all the board positions and pieces, with optional ``TEMPERATURE`` for randomness.
-
-        Args:
-            ``x_board``: Input tensor of shape (batch_size, 16, 4, 4).
-            ``x_piece``: Input tensor of shape (batch_size, 16).
-            ``TEMPERATURE``: Sampling temperature (>0). Lower values make predictions more deterministic.
-            ``DETERMINISTIC``: If True, use argmax instead of sampling.
-
-        Returns:
-            * ``board_position``: Predicted idx board position (batch_size, 4, 4).
-            * ``predicted_piece``: Sampled idx piece indices (batch_size, 16).
-        """
-        assert x_board.shape[1:] == (
-            16,
-            4,
-            4,
-        ), "Input tensor must have shape (batch_size, 16, 4, 4)"
-        assert x_piece.shape[1] == 16, "Input tensor must have shape (batch_size, 16)"
-        assert (
-            x_board.shape[0] == x_piece.shape[0]
-        ), "Input tensors must have the same batch size"
-
-        self.eval()
-        with torch.no_grad():
-            qav_board, qav_piece = self.forward(x_board, x_piece)
-
-            # Use tanh outputs directly for deterministic prediction
-            if DETERMINISTIC:
-                board_indices = torch.argsort(qav_board, descending=True, dim=1)
-                piece_indices = torch.argsort(qav_piece, descending=True, dim=1)
-                return board_indices, piece_indices
-            else:
-                # For stochastic prediction, use softmax over tanh outputs and sample
-                board_probs = F.softmax(qav_board / TEMPERATURE, dim=1)
-                piece_probs = F.softmax(qav_piece / TEMPERATURE, dim=1)
-                board_indices = torch.multinomial(
-                    board_probs,
-                    board_probs.shape[1],  # all possible combinations
-                    replacement=False,
-                )
-                piece_indices = torch.multinomial(
-                    piece_probs,
-                    piece_probs.shape[1],  # all possible combinations
-                    replacement=False,
-                )
-                return board_indices, piece_indices

@@ -32,10 +32,11 @@ class NN_abstract(ABC, torch.nn.Module):
         pass
 
     @abstractmethod
-    def forward(self, x_board: torch.Tensor, x_piece: torch.Tensor, *args, **kwargs):
+    def forward(
+        self, x_board: torch.Tensor, x_piece: torch.Tensor, *args, **kwargs
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         pass
 
-    @abstractmethod
     def predict(
         self,
         x_board: torch.Tensor,
@@ -44,19 +45,58 @@ class NN_abstract(ABC, torch.nn.Module):
         DETERMINISTIC: bool = True,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        Predict the board position and piece from the input tensor, with optional ``TEMPERATURE`` for randomness.
+        Predicts the preferred order of all board positions and pieces, with optional ``TEMPERATURE`` for randomness.
 
         Args:
             ``x_board``: Input tensor of shape (batch_size, 16, 4, 4).
             ``x_piece``: Input tensor of shape (batch_size, 16).
             ``TEMPERATURE``: Sampling temperature (>0). Lower values make predictions more deterministic.
-            ``DETERMINISTIC``: If True, use argmax instead of sampling.
+                Only used when ``DETERMINISTIC`` is False.
+            ``DETERMINISTIC``: If True, returns sorted indices by Q-value (argmax).
+                If False, samples from softmax distribution.
 
         Returns:
-            board_position: Predicted board position (batch_size, 4, 4).
-            predicted_piece: Sampled piece indices (batch_size, 16).
+            * ``board_indices``: Ordered board position indices (batch_size, 16).
+                Index 0 is the best position, index 15 is the worst.
+            * ``piece_indices``: Ordered piece indices (batch_size, 16).
+                Index 0 is the best piece, index 15 is the worst.
         """
-        pass
+        assert x_board.shape[1:] == (
+            16,
+            4,
+            4,
+        ), "Input tensor must have shape (batch_size, 16, 4, 4)"
+        assert x_piece.shape[1] == 16, "Input tensor must have shape (batch_size, 16)"
+        assert (
+            x_board.shape[0] == x_piece.shape[0]
+        ), "Input tensors must have the same batch size"
+
+        self.eval()
+        with torch.no_grad():
+            qav_board, qav_piece = self.forward(x_board, x_piece)
+
+            # Use tanh outputs directly for deterministic prediction
+            if DETERMINISTIC:
+                board_indices = torch.argsort(qav_board, descending=True, dim=1)
+                piece_indices = torch.argsort(qav_piece, descending=True, dim=1)
+                return board_indices, piece_indices
+            else:
+                # For stochastic prediction, use softmax over tanh outputs and sample
+                import torch.nn.functional as F
+
+                board_probs = F.softmax(qav_board / TEMPERATURE, dim=1)
+                piece_probs = F.softmax(qav_piece / TEMPERATURE, dim=1)
+                board_indices = torch.multinomial(
+                    board_probs,
+                    board_probs.shape[1],  # all possible combinations
+                    replacement=False,
+                )
+                piece_indices = torch.multinomial(
+                    piece_probs,
+                    piece_probs.shape[1],  # all possible combinations
+                    replacement=False,
+                )
+                return board_indices, piece_indices
 
     # ####################################################################
     @classmethod
@@ -64,8 +104,11 @@ class NN_abstract(ABC, torch.nn.Module):
         """
         Load the model from a file.
 
+        Args:
+            weights_path: Path to the saved model weights file (.pt file).
+
         Returns:
-            QuartoCNN instance with loaded weights.
+            NN_abstract: Model instance with loaded weights.
         """
         model = cls()
 

@@ -22,6 +22,7 @@ from utils.logger import logger
 import numpy as np
 import torch
 import os
+from tensordict import TensorDict
 
 logger.debug("Loading CNN_bot...")
 
@@ -40,7 +41,8 @@ class Quarto_bot(BotAI):
         self,
         *,
         model_path: str | None = None,
-        model: QuartoCNN | None = None,
+        model: NN_abstract | None = None,
+        model_class: type[NN_abstract] = QuartoCNN,
         deterministic: bool = True,
         temperature: float = 0.1,
     ):
@@ -48,10 +50,16 @@ class Quarto_bot(BotAI):
         Initializes the CNN bot.
         ## Parameters
         ``model_path``: str | None
-            Path to the pre-trained model. If None, random weights are loaded.
+            Path to the pre-trained model. If None and ``model`` is None, random weights are loaded.
 
-        ``model``: QuartoCNN | None
-            An instance of QuartoCNN. If provided, it will be used instead of loading from a file.
+        ``model``: NN_abstract | None
+            An instance of a model derived from NN_abstract. If provided, it will be used instead of loading from a file.
+            Cannot be used together with ``model_path``.
+
+        ``model_class``: type[NN_abstract] | None
+            The model class to instantiate when loading from ``model_path``.
+            Defaults to QuartoCNN if not provided.
+            Only used when ``model_path`` is provided.
 
         ``deterministic``: bool
             If True, the model will select the most probable action. Default is True.
@@ -68,14 +76,20 @@ class Quarto_bot(BotAI):
         """
         super().__init__()  # aunque no hace nada
         logger.debug(f"CNN_bot initialized")
-        assert (
-            model_path is None or model is None
-        ), "Either ``model_path`` or ``model`` must be provided, but not both."
+
+        # Validate input parameters
+        assert not (
+            model_path is not None and model is not None
+        ), "Cannot provide both ``model_path`` and ``model`` instance. Choose one."
 
         if model_path:
-            logger.debug(f"Loading model from {model_path}")
-            self.model = QuartoCNN.from_file(model_path)
+            # Use provided model_class
+            logger.debug(
+                f"Loading model from {model_path} using {model_class.__name__}"
+            )
+            self.model = model_class.from_file(model_path)
             self.model_path = os.path.basename(model_path)
+
         elif model:
             assert isinstance(
                 model, NN_abstract
@@ -87,7 +101,7 @@ class Quarto_bot(BotAI):
 
         else:
             logger.debug("Loading model with random weights")
-            self.model = QuartoCNN()
+            self.model = model_class()
         logger.debug("Model loaded successfully")
 
         self._recalculate = True  # Recalculate the model on each turn
@@ -171,3 +185,38 @@ class Quarto_bot(BotAI):
             self._recalculate = True
         board_position, _ = self.calculate(game, ith_option)
         return board_position
+
+    def evaluate(self, exp_batch: TensorDict) -> tuple[torch.Tensor, torch.Tensor]:
+        """Evaluates a batch of experiences and returns the Q-values for the taken actions.
+        This is useful for tracking how action-values evolve during training.
+
+        ## Parameters
+        ``exp_batch``: TensorDict
+            Batch of experiences containing:
+            - state_board: Board states (batch_size, 16, 4, 4)
+            - state_piece: Piece states (batch_size, 16)
+            - action_place: Placement actions taken (batch_size,)
+            - action_sel: Selection actions taken (batch_size,)
+
+        ## Returns
+        ``q_place``: torch.Tensor
+            Q-values for the placement actions taken (batch_size,)
+        ``q_select``: torch.Tensor
+            Q-values for the selection actions taken (batch_size,)
+        """
+        state_board: torch.Tensor = exp_batch["state_board"]
+        state_piece: torch.Tensor = exp_batch["state_piece"]
+        action_place = exp_batch["action_place"].to(torch.int64)
+        action_sel = exp_batch["action_sel"].to(torch.int64)
+
+        # Get Q-values for all actions
+        self.model.eval()
+        with torch.no_grad():
+            qav_board, qav_piece = self.model.forward(state_board, state_piece)
+
+        # Extract Q-values for the actual actions taken
+        batch_indices = torch.arange(state_board.shape[0])
+        q_place = qav_board[batch_indices, action_place]
+        q_select = qav_piece[batch_indices, action_sel]
+
+        return q_place, q_select
