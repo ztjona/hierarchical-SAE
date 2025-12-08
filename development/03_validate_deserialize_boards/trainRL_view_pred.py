@@ -138,14 +138,24 @@ q_values_history: dict[str, list] = {
 
 # ###########################
 torch.manual_seed(5)
+
+# Setup device - use CUDA if available, otherwise CPU
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+logger.info(f"Using device: {device}")
+
 policy_net = ARCHITECTURE()
 target_net = ARCHITECTURE()
+
+# Move models to device
+policy_net.to(device)
+target_net.to(device)
+logger.info(f"Models moved to {device}")
 
 # Load starting checkpoint if provided
 if STARTING_NET is not None:
     logger.info(f"Loading starting checkpoint from: {STARTING_NET}")
     try:
-        policy_net.load_state_dict(torch.load(STARTING_NET))
+        policy_net.load_state_dict(torch.load(STARTING_NET, map_location=device))
         logger.info("Successfully loaded starting checkpoint")
     except FileNotFoundError:
         logger.error(f"Checkpoint file not found: {STARTING_NET}")

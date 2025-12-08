@@ -355,6 +355,10 @@ def DQN_training_step(
     policy_net.train()
     # target_net.eval()  # Target network is always in eval mode
 
+    # Move experience batch to the same device as the model
+    device = next(policy_net.parameters()).device
+    exp_batch = exp_batch.to(device)
+
     pred_board_place, pred_piece = policy_net(
         exp_batch["state_board"], exp_batch["state_piece"]
     )
