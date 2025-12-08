@@ -151,6 +151,7 @@ class Quarto_bot(BotAI):
             self._recalculate = False  # Do not recalculate until the next turn
 
         # load from cached values
+        # 0 for batch size is 1
         _idx_piece: int = self.select_piece_onehot_cached[0, ith_try].item()  # type: ignore
         selected_piece = Piece.from_index(_idx_piece)
 
@@ -195,14 +196,18 @@ class Quarto_bot(BotAI):
             Batch of experiences containing:
             - state_board: Board states (batch_size, 16, 4, 4)
             - state_piece: Piece states (batch_size, 16)
-            - action_place: Placement actions taken (batch_size,)
-            - action_sel: Selection actions taken (batch_size,)
+            - action_place: Placement actions taken (batch_size,). -1 for first move.
+            - action_sel: Selection actions taken (batch_size,). -1 for terminal states.
 
         ## Returns
         ``q_place``: torch.Tensor
             Q-values for the placement actions taken (batch_size,)
         ``q_select``: torch.Tensor
             Q-values for the selection actions taken (batch_size,)
+
+        ## Note
+        Terminal states (winning moves) have action_sel=-1, which will cause
+        incorrect indexing. The caller should handle this appropriately.
         """
         state_board: torch.Tensor = exp_batch["state_board"]
         state_piece: torch.Tensor = exp_batch["state_piece"]

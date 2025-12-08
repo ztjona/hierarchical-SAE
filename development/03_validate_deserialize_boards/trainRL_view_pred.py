@@ -1,6 +1,6 @@
 from utils.logger import logger
 
-logger.info("Starting. Importing...")
+logger.info("Starting Importing...")
 
 import torch
 import torch.nn as nn
@@ -17,20 +17,21 @@ from QuartoRL import (
     DQN_training_step,
     plot_win_rate,
     plot_loss,
+    plot_boards_comp,
+    plot_Qv_progress,
 )
 from tqdm.auto import tqdm
 from pprint import pprint
 import pickle
 from colorama import init, Fore, Style
 import matplotlib.pyplot as plt
-import numpy as np
 
 # ---- PARAMS ----
 logger.info("Imports done.")
 
-STARTING_NET = "CHECKPOINTS//REF//20251023_1649-_E02_win_rate_epoch_0022.pt"
-# STARTING_NET = None  # Set to None to start with random weights
-EXPERIMENT_NAME = "_E03"
+# STARTING_NET = "CHECKPOINTS//REF//20251023_1649-_E02_win_rate_epoch_0022.pt"
+STARTING_NET = None  # Set to None to start with random weights
+EXPERIMENT_NAME = "Validate01"
 CHECKPOINT_FOLDER = f"./CHECKPOINTS/{EXPERIMENT_NAME}/"
 
 # The bot at the end of each epoch will be evaluated against a limited number of rivals known as BASELINES.
@@ -64,14 +65,14 @@ BASELINES = [
 N_MATCHES_EVAL = 30  # number of matches to evaluate the bot at the end of each epoch for the selected BASELINES
 
 
-BATCH_SIZE = 512
+BATCH_SIZE = 30
 # When True, checks for winning in 2x2 squares. False, only in rows, columns and diagonals.
 mode_2x2 = True
 
 # every epoch experience is generated with a new bot instance, models are saved at the end of each epoch
-EPOCHS = 1_000
+EPOCHS = 1500
 
-MATCHES_PER_EPOCH = 310  # number self-play matches per epoch
+MATCHES_PER_EPOCH = 500  # number self-play matches per epoch
 # ~x10 of matches_per_epoch, used to generate experience
 STEPS_PER_EPOCH = 10 * MATCHES_PER_EPOCH
 # number of times the network is updated per epoch
@@ -84,9 +85,9 @@ REPLAY_SIZE = 50 * STEPS_PER_EPOCH
 N_BATCHS_2_UPDATE_TARGET = ITER_PER_EPOCH // 2
 
 # number of last states to consider in the experience generation at the beginning of training
-N_LAST_STATES_INIT: int = 2
+N_LAST_STATES_INIT: int = 5
 # number of last states to consider in the experience generation at the end of training. -1 means all states
-N_LAST_STATES_FINAL = 16  # 16 is all states in 4x4 board
+N_LAST_STATES_FINAL = 5  # 16 is all states in 4x4 board
 
 # temperature for exploration, higher values lead to more exploration
 TEMPERATURE_EXPLORE = 2  # view test of temperature
@@ -96,8 +97,8 @@ TEMPERATURE_EXPLOIT = 0.1
 
 FREQ_EPOCH_SAVING = 100  # save model, figures every n epochs
 # in iters if >= N_ITERS show epoch lines in loss plot
-SHOW_EPOCH_LINES = ITER_PER_EPOCH * 20
 SMOOTHING_WINDOW = 10
+
 # ###########################
 MAX_GRAD_NORM = 1.0
 LR = 5e-5  # initial
@@ -119,9 +120,13 @@ RIVALS_CLASS = BASELINES[0]["bot"]  # assumes all baselines have the same class 
 RIVALS_PARAMs = BASELINES[0]["params"]
 
 win_rate: dict[str | int, list[float]] = {}  # list of win rates of epochs by rival
+q_values_history: dict[str, list] = {
+    "q_place": [],
+    "q_select": [],
+}  # Track Q-values over epochs
 
 # ###########################
-torch.manual_seed(50)
+torch.manual_seed(5)
 policy_net = QuartoCNN()
 target_net = QuartoCNN()
 
@@ -207,21 +212,28 @@ for e in tqdm(
     )
     logger.info(f"Using n_last_states={n_last_states} for epoch {e + 1}")
 
-    # ---- GENERATE EXPERIENCE by SELF-PLAY----
-    exp = gen_experience(
-        p1_bot=p1,
-        p2_bot=p2,
-        n_last_states=n_last_states,
-        number_of_matches=MATCHES_PER_EPOCH,
-        mode_2x2=mode_2x2,
-        PROGRESS_MESSAGE=f"{Fore.YELLOW}Generating experience for epoch {e + 1}{Style.RESET_ALL}",
-    )
+    if e == 0:
+        logger.info("Generating initial experience...")
+        # ---- GENERATE EXPERIENCE by SELF-PLAY----
+        exp, boards = gen_experience(
+            p1_bot=p1,
+            p2_bot=p2,
+            n_last_states=n_last_states,
+            number_of_matches=MATCHES_PER_EPOCH,
+            mode_2x2=mode_2x2,
+            PROGRESS_MESSAGE=f"{Fore.YELLOW}Generating experience for epoch {e + 1}{Style.RESET_ALL}",
+            COLLECT_BOARDS=True,
+        )
+        replay_buffer.extend(exp)  # type: ignore
 
-    replay_buffer.extend(exp)  # type: ignore
+    else:
+        logger.info("Reusing same previous experience...")
+        # exp = exp # ...
 
     for i in range(ITER_PER_EPOCH):
         pbar.update(1)
-        exp_batch = replay_buffer.sample(BATCH_SIZE)
+        # exp_batch = replay_buffer.sample(BATCH_SIZE)
+        exp_batch = exp
         if exp_batch.shape[0] < BATCH_SIZE:
             logger.warning(
                 f"Not enough data to sample a full batch. Expected {BATCH_SIZE}, got {exp_batch.shape[0]}"
@@ -234,7 +246,6 @@ for e in tqdm(
             target_net=target_net,
             exp_batch=exp_batch,
             GAMMA=GAMMA,
-            loss_fcn=loss_fcn,  # type: ignore
         )
         loss = loss_fcn(state_action_values, expected_state_action_values)
         loss_data["loss_values"].append(loss.item())
@@ -266,7 +277,32 @@ for e in tqdm(
                     key
                 ] * TAU + target_net_state_dict[key] * (1 - TAU)
             target_net.load_state_dict(target_net_state_dict)
+            target_net.eval()  # Ensure target network stays in eval mode
 
+    # Evaluate Q-values for the experience batch
+    q_place, q_select = p1.evaluate(exp)
+
+    # Store Q-values for tracking progression
+    q_values_history["q_place"].append(q_place)
+    q_values_history["q_select"].append(q_select)
+
+    # Update board names with Q-values and rewards
+    boards_with_qvalues = []
+    for idx, (b_state, b_next) in enumerate(boards):  # type: ignore
+        # b_state.name = (
+        #     f"{idx}|selected|Player {(idx % 2) + 1} | R={exp['reward'][idx].item():.0f}"
+        # )
+        b_next.name = f"Next Board| Q_place={q_place[idx].item():.2f}|Q_sel={q_select[idx].item():.2f}"
+        boards_with_qvalues.append((b_state, b_next))
+
+    plot_boards_comp(*boards_with_qvalues)
+    plot_Qv_progress(
+        q_values_history,
+        exp["reward"],
+        fig_num=4,
+        DISPLAY_PLOT=True,
+        done_v=exp["done"],
+    )
     # ------- END OF EPOCH -------
     loss_data["epoch_values"].append(step_i)
     # Save the model at the end of each epoch
@@ -335,7 +371,6 @@ for e in tqdm(
         loss_data,
         FREQ_EPOCH_SAVING=FREQ_EPOCH_SAVING,
         FOLDER_SAVE=CHECKPOINT_FOLDER,
-        SHOW_EPOCH_LINES=SHOW_EPOCH_LINES,
         DISPLAY_PLOT=True,
     )
 

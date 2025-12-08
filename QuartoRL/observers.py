@@ -1,0 +1,270 @@
+# -*- coding: utf-8 -*-
+
+"""
+Python 3
+04 / 12 / 2025
+@author: z_tjona
+
+
+"I find that I don't understand things unless I try to program them."
+-Donald E. Knuth
+
+"Either mathematics is too big for the human mind or the human mind is more than a machine."
+-Kurt Godël
+"""
+
+
+from quartopy import Board
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+import random
+
+
+def plot_boards_comp(
+    *boards_pair: tuple[Board, Board],
+    fig_num: int = 3,
+    DISPLAY_PLOT: bool = True,
+    MAX_BOARDS: int = 6,
+) -> None:
+    """Plot pairs of boards side by side in a 2xn subplot grid (transposed).
+
+    Parameters
+    ----------
+    *boards_pair : tuple[Board, Board]
+        Variable number of board pairs to compare. Typically (state, next_state).
+    fig_num : int
+        Figure number to use for plotting (default: 3)
+    DISPLAY_PLOT : bool
+        Whether to display the plot interactively (default: True)
+    MAX_BOARDS : int
+        Maximum number of board pairs to display. If more pairs provided,
+        randomly samples MAX_BOARDS pairs (default: 6)
+    """
+    n = len(boards_pair)
+    if n == 0:
+        return
+
+    # Limit to MAX_BOARDS random samples
+    if n > MAX_BOARDS:
+        indices = random.sample(range(n), MAX_BOARDS)
+        boards_pair = tuple(boards_pair[i] for i in sorted(indices))
+        n = MAX_BOARDS
+
+    # Create 2xn subplot grid (transposed) with adaptive sizing
+    # Retrieve existing figure or create new one
+    if plt.fignum_exists(fig_num):
+        fig = plt.figure(fig_num)
+        fig.clf()  # Clear figure content but keep the window
+    else:
+        fig = plt.figure(fig_num, figsize=(16, 9), constrained_layout=True)
+
+    axes = fig.subplots(2, n)
+
+    # Handle single pair case (axes won't be 2D)
+    if n == 1:
+        axes = np.array(axes).reshape(-1, 1)
+
+    # Plot each pair (transposed: rows are board states, columns are pairs)
+    for i, (b1, b2) in enumerate(boards_pair):
+        b1.plot(title=b1.name, ax=axes[0, i], show=False)
+        b2.plot(title=b2.name, ax=axes[1, i], show=False)
+
+    if DISPLAY_PLOT:
+        plt.draw()
+        plt.pause(0.001)
+
+
+def plot_Qv_progress(
+    q_values_history: dict[str, list[torch.Tensor]],
+    rewards: torch.Tensor,
+    fig_num: int = 4,
+    DISPLAY_PLOT: bool = True,
+    done_v: torch.Tensor = None,
+) -> None:
+    """Plot Q-value progression over epochs for each sample in the batch.
+
+    Parameters
+    ----------
+    q_values_history : dict[str, list[torch.Tensor]]
+        Dictionary with keys 'q_place' and 'q_select', each containing a list of
+        tensors (one per epoch) with Q-values for each sample
+    rewards : torch.Tensor
+        Target rewards for each sample (batch_size,)
+    fig_num : int
+        Figure number to use for plotting (default: 4)
+    DISPLAY_PLOT : bool
+        Whether to display the plot interactively (default: True)
+    done_v : torch.Tensor, optional
+        Boolean tensor indicating whether each sample is a terminal state (batch_size,).
+        Terminal states are plotted with higher prominence (thicker, more opaque lines).
+    """
+    if not q_values_history or len(q_values_history.get("q_place", [])) == 0:
+        return
+
+    # Extract Q-values
+    q_place_history = q_values_history.get("q_place", [])
+    q_select_history = q_values_history.get("q_select", [])
+
+    batch_size = q_place_history[0].shape[0] if q_place_history else 0
+    n_epochs = len(q_place_history)
+
+    if batch_size == 0:
+        return
+
+    epochs = np.arange(n_epochs)
+
+    # Retrieve existing figure or create new one
+    if plt.fignum_exists(fig_num):
+        fig = plt.figure(fig_num)
+        fig.clf()
+    else:
+        fig = None  # Will be created below with appropriate size
+
+    # Handle large batch size (>15): plot 4 aggregated curves grouped by reward
+    if batch_size > 15:
+        if fig is None:
+            fig = plt.figure(fig_num, figsize=(16, 10), constrained_layout=True)
+        axes = fig.subplots(2, 2)
+
+        # Split samples by reward value
+        win_indices = [i for i in range(batch_size) if rewards[i].item() == 1.0]
+        non_win_indices = [i for i in range(batch_size) if rewards[i].item() != 1.0]
+
+        # 1) Q_place for win samples (R=1)
+        ax = axes[0, 0]
+        for i in win_indices:
+            q_place_sample = [q[i].item() for q in q_place_history]
+            is_terminal = done_v[i].item() if done_v is not None else False
+            ax.plot(
+                epochs,
+                q_place_sample,
+                "-",
+                alpha=0.3 if is_terminal else 0.15,
+                linewidth=1.5 if is_terminal else 0.5,
+            )
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("Q-value")
+        ax.set_ylim(-1, 1)
+        ax.set_title("Q_place - Win Samples (R=1)")
+        ax.grid(True, alpha=0.3)
+
+        # 2) Q_place for non-win samples (R=0 or R=-1)
+        ax = axes[0, 1]
+        for i in non_win_indices:
+            q_place_sample = [q[i].item() for q in q_place_history]
+            is_terminal = done_v[i].item() if done_v is not None else False
+            ax.plot(
+                epochs,
+                q_place_sample,
+                "-",
+                alpha=0.3 if is_terminal else 0.15,
+                linewidth=1.5 if is_terminal else 0.5,
+            )
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("Q-value")
+        ax.set_ylim(-1, 1)
+        ax.set_title("Q_place - Non-Win Samples (R≠1)")
+        ax.grid(True, alpha=0.3)
+
+        # 3) Q_select for win samples (R=1)
+        ax = axes[1, 0]
+        for i in win_indices:
+            q_select_sample = [q[i].item() for q in q_select_history]
+            is_terminal = done_v[i].item() if done_v is not None else False
+            ax.plot(
+                epochs,
+                q_select_sample,
+                "-",
+                alpha=0.3 if is_terminal else 0.15,
+                linewidth=1.5 if is_terminal else 0.5,
+            )
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("Q-value")
+        ax.set_ylim(-1, 1)
+        ax.set_title("Q_select - Win Samples (R=1)")
+        ax.grid(True, alpha=0.3)
+
+        # 4) Q_select for non-win samples (R=0 or R=-1)
+        ax = axes[1, 1]
+        for i in non_win_indices:
+            q_select_sample = [q[i].item() for q in q_select_history]
+            is_terminal = done_v[i].item() if done_v is not None else False
+            ax.plot(
+                epochs,
+                q_select_sample,
+                "-",
+                alpha=0.3 if is_terminal else 0.15,
+                linewidth=1.5 if is_terminal else 0.5,
+            )
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("Q-value")
+        ax.set_ylim(-1, 1)
+        ax.set_title("Q_select - Non-Win Samples (R≠1)")
+        ax.grid(True, alpha=0.3)
+
+    else:
+        # Small batch size (<16): create suitable grid layout
+        # Determine grid dimensions
+        if batch_size <= 3:
+            nrows, ncols = 1, batch_size
+        elif batch_size <= 6:
+            nrows, ncols = 2, 3
+        elif batch_size <= 8:
+            nrows, ncols = 2, 4
+        elif batch_size <= 12:
+            nrows, ncols = 4, 3
+        else:  # 13-15
+            nrows, ncols = 4, 4
+
+        if fig is None:
+            fig = plt.figure(
+                fig_num, figsize=(4 * ncols, 3 * nrows), constrained_layout=True
+            )
+
+        axes = fig.subplots(nrows, ncols)
+        axes = np.atleast_2d(axes)  # Ensure 2D array
+        axes_flat = axes.transpose().flatten()
+
+        # Plot each sample (Q_place and Q_select on same axis)
+        for i in range(batch_size):
+            ax = axes_flat[i]
+
+            # Extract Q-values for this sample across epochs
+            q_place_sample = [q[i].item() for q in q_place_history]
+            q_select_sample = [q[i].item() for q in q_select_history]
+            target_reward = rewards[i].item()
+
+            # Plot both Q_place and Q_select
+            ax.plot(
+                epochs, q_place_sample, "o-", label="Q_place", color="blue", alpha=0.7
+            )
+            ax.plot(
+                epochs,
+                q_select_sample,
+                "s-",
+                label="Q_select",
+                color="green",
+                alpha=0.7,
+            )
+            ax.axhline(
+                y=target_reward,
+                color="red",
+                linestyle="--",
+                linewidth=2,
+                label=f"Target R={target_reward:.1f}",
+            )
+            ax.set_xlabel("Epoch")
+            ax.set_ylabel("Q-value")
+            ax.set_ylim(-1, 1)
+            ax.set_title(f"Sample {i}")
+            ax.legend(fontsize=8)
+            ax.grid(True, alpha=0.3)
+
+        # Hide unused subplots
+        for i in range(batch_size, len(axes_flat)):
+            axes_flat[i].set_visible(False)
+
+    if DISPLAY_PLOT:
+        plt.draw()
+        plt.pause(0.001)

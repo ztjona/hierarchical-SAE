@@ -11,7 +11,7 @@ Python 3
 
 from utils.logger import logger
 
-from tensordict import set_list_to_stack, TensorDict
+from tensordict import TensorDict
 
 from quartopy import play_games, BotAI, Board
 
@@ -58,9 +58,9 @@ def convert_2_state_action_reward(match_data, REWARD_FUNCTION_TYPE: str = "propa
     # State is represented in ``state_boards`` and ``state_piece``
     # Action is represented in ``action_place`` and ``action_sel``
     # Assuming SELF PLAY: the bot plays both players
-    # Rewards are from perspective of player 1, and are inverted for the turns of the second player
-    # NOTE: ``board_next_state`` includes the final board after placing the piece and thus have the same size as ``board_state`` in winning or drawing.
-    # NOTE: ``piece_next_state`` not exist when winning, because there is no selected piece for next turn.
+    # Rewards are from the perspective of the player taking the action (alternating P1/P2)
+    # NOTE: ``board_next_state`` includes the final board after placing the piece and thus has the same size as ``board_state`` in winning or drawing.
+    # NOTE: ``piece_next_state`` is -1 for terminal states (winning moves), because there is no piece selection after winning.
 
     _current_board = "0"  # first state board is empty
     # The state and next_board include empty board, because:
@@ -160,7 +160,7 @@ def convert_2_state_action_reward(match_data, REWARD_FUNCTION_TYPE: str = "propa
 
     # ---- DONE
     done = [False] * _num_non_terminal_states
-    done.append(True)  # onnly last state is the ending state
+    done.append(True)  # only last state is the terminal state
 
     df = pd.DataFrame(
         {
@@ -216,23 +216,23 @@ def gen_experience(
         If True, collects the board states during the matches. Default is False.
 
     ## Returns
-    ```
-    TensorDict(
-        fields={
-            action_place: Tensor(shape=torch.Size([400]),
-            action_sel: Tensor(shape=torch.Size([400]),
-            done: Tensor(shape=torch.Size([400]),
-            next_state_board: Tensor(shape=torch.Size([400, 16, 4, 4]),
-            next_state_piece: Tensor(shape=torch.Size([400, 16]),
-            reward: Tensor(shape=torch.Size([400]),
-            state_board: Tensor(shape=torch.Size([400, 16, 4, 4]),
-            state_piece: Tensor(shape=torch.Size([400, 16])},
-        batch_size=torch.Size([400]),
-        device=cpu,
-        is_shared=False)
-    list[Board Board next state] [OPTIONAL] if COLLECT_BOARDS is True
-
-    ```
+    TensorDict or tuple[TensorDict, list[tuple[Board, Board]]]
+        If COLLECT_BOARDS is False (default):
+            Returns only TensorDict with experience data
+        If COLLECT_BOARDS is True:
+            Returns tuple of (TensorDict, list of board pairs)
+    
+    TensorDict contains:
+        - state_board: Board states (N, 16, 4, 4)
+        - state_piece: Piece one-hot vectors (N, 16)
+        - action_place: Placement actions (N,). -1 for first moves.
+        - action_sel: Selection actions (N,). -1 for terminal states.
+        - reward: Rewards (N,)
+        - done: Terminal state flags (N,)
+        - next_state_board: Next board states (N, 16, 4, 4)
+        - next_state_piece: Next piece vectors (N, 16)
+    
+    Where N is the total number of states collected (varies by matches).
     """
     logger.debug("Generating experience...")
 
@@ -258,12 +258,13 @@ def gen_experience(
         exp = convert_2_state_action_reward(
             match_data, REWARD_FUNCTION_TYPE=REWARD_FUNCTION_TYPE
         )
+
         if n_last_states < exp.shape[0]:
             exp = exp.iloc[-n_last_states:]
-        # elif n_last_states > exp.shape[0]:
-        #     logger.warning(
-        #         f"n_last_states ({n_last_states}) is greater than the number of states in the match ({exp.shape[0]}). Using all states."
-        #     )
+        elif n_last_states >= exp.shape[0]:
+            logger.warning(
+                f"n_last_states ({n_last_states}) is greater than the number of states in the match ({exp.shape[0]}). Using all states."
+            )
         exp_all.append(exp)
 
         if COLLECT_BOARDS:
@@ -273,9 +274,12 @@ def gen_experience(
                     (
                         Board.serialized_2_board(
                             b["board_state"],
-                            name=f"{b['mov_description']}R={b['reward']}",
+                            name=f"{b['mov_description']} | R={b['reward']}",
                         ),
-                        Board.serialized_2_board(b["board_next_state"], name="sad"),
+                        Board.serialized_2_board(
+                            b["board_next_state"],
+                            name=f"{b['mov_description']} | R={b['reward']}",
+                        ),
                     )
                 )
 
@@ -326,55 +330,96 @@ def DQN_training_step(
     target_net: NN_abstract,
     GAMMA: float,
     exp_batch: TensorDict,
-    loss_fcn=SmoothL1Loss,
 ):
+    """Perform one DQN training step using the given batch of experiences.
+    
+    Parameters
+    ----------
+    policy_net : NN_abstract
+        The policy network being trained
+    target_net : NN_abstract
+        The target network for computing stable Q-value targets
+    GAMMA : float
+        Discount factor for future rewards
+    exp_batch : TensorDict
+        Batch of experiences with state, action, reward, next_state, done
+    
+    Returns
+    -------
+    state_action_values : torch.Tensor
+        Q-values for the actions taken in the batch
+    expected_state_action_values : torch.Tensor
+        Target Q-values computed using target network and Bellman equation
+    """
+    # Ensure networks are in correct mode
+    policy_net.train()
+    # target_net.eval()  # Target network is always in eval mode
+
     pred_board_place, pred_piece = policy_net(
         exp_batch["state_board"], exp_batch["state_piece"]
     )
-    # --- FILTER ACTIONS
-    # filter -1 actions, because they are not valid actions.
-    # Which one to choose? 0? but if the action is 0, then it is a valid action...
-    action_sel = torch.where(
-        exp_batch["action_sel"] == -1,
-        # torch.zeros_like(exp_batch["action_sel"]),
-        0,
-        exp_batch["action_sel"],
-    )
-    action_pos = torch.where(
-        exp_batch["action_place"] == -1,
-        # torch.zeros_like(exp_batch["action_place"]),
-        0,
-        exp_batch["action_place"],
-    )
 
-    # Compute Q(s_t, a) - the model computes Q(s_t), then we select the  columns of actions taken. These are the actions which would've been taken for each batch state according to policy_net
+    # --- HANDLE SPECIAL CASES
+    # First move (turn 0): action_place=-1 (no placement on empty board)
+    # Terminal states: action_sel=-1 (no piece selection after winning)
+    # Both first_move and terminal cannot occur simultaneously
 
-    # se necesita unsqueeze(0) para que gather funcione correctamente (tener misma cantidad de dimensiones)
-    # pred_piece is [batch_size, 16]
-    # action_sel is [batch_size]
-    # after gather, state_sel_action_values is [1, batch_size] so we need to squeeze it to [batch_size]
-    state_sel_action_values = pred_piece.gather(
-        1, action_sel.unsqueeze(0).type(torch.int64)
-    ).squeeze()
-    state_place_action_values = pred_board_place.gather(
-        1, action_pos.unsqueeze(0).type(torch.int64)
-    ).squeeze()
-    state_action_values = state_sel_action_values + state_place_action_values
+    # Extract action indices
+    action_pos = exp_batch["action_place"]
+    action_sel = exp_batch["action_sel"]
 
-    # ------- Compute V(s_{t+1}) for all next states.
-    # Prealloc with 0 because final states have 0 value
-    next_state_values = torch.zeros_like(exp_batch["reward"])
-    non_final_mask = torch.where(~exp_batch["done"])
+    # Initialize Q-value tensors (will be 0 for invalid actions)
+    state_place_action_values = torch.zeros_like(action_pos, dtype=torch.float32)
+    state_sel_action_values = torch.zeros_like(action_sel, dtype=torch.float32)
+
+    # --- Create masks for different experience types
+    first_move_mask = action_pos == -1  # First move has no placement (empty board)
+    final_move_mask = action_sel == -1  # Terminal states have no piece selection (game ended)
+    non_terminal_mask = ~final_move_mask
+    terminal_mask = exp_batch["done"]
+
+    # Sanity checks
+    assert (
+        ~(first_move_mask & final_move_mask)
+    ).all(), "Invalid experience with both first and final move."
+
+    assert terminal_mask[final_move_mask].all(), "All experiences with action_sel=-1 must be terminal states."
+
+    # Extract valid action indices (excluding -1 values)
+    action_pos_valid = action_pos[~first_move_mask]
+    action_sel_valid = action_sel[~final_move_mask]
+
+    # Gather Q-values for valid placement actions
+    state_place_action_values[~first_move_mask] = pred_board_place.gather(
+        1, action_pos_valid.unsqueeze(1).type(torch.int64)
+    ).squeeze(1)
+
+    # Gather Q-values for valid selection actions
+    state_sel_action_values[non_terminal_mask] = pred_piece.gather(
+        1, action_sel_valid.unsqueeze(1).type(torch.int64)
+    ).squeeze(1)
+
+    # Combine Q-values: average of placement and selection Q-values
+    # Note: For first moves, only selection counts (place=0)
+    #       For terminal states, only placement counts (select=0)
+    state_action_values = (state_place_action_values + state_sel_action_values) / 2
+
+    # ------- Compute V(s_{t+1}) for all next states using target network
+    # Initialize with zeros (terminal states have V=0 by definition)
+    next_state_values = torch.zeros(exp_batch.shape, device=exp_batch["reward"].device)
+
+    # Compute V(s') = max_a Q(s', a) for non-terminal next states
     with torch.no_grad():
         _next_state_pos, _next_state_piece = target_net(
-            exp_batch["next_state_board"][non_final_mask],
-            exp_batch["next_state_piece"][non_final_mask],
+            exp_batch["next_state_board"][non_terminal_mask],
+            exp_batch["next_state_piece"][non_terminal_mask],
         )
-        _next_val = _next_state_pos + _next_state_piece
-        next_state_values[non_final_mask] = _next_val.max(dim=1).values
+        # Combine Q-values using same method as state_action_values
+        _next_val = (_next_state_pos + _next_state_piece) / 2
+        # Take maximum Q-value across all possible actions
+        next_state_values[non_terminal_mask] = _next_val.max(dim=1).values
 
-    # Compute the expected Q values
+    # Compute target Q-values using Bellman equation: Q(s,a) = R + γ*max_a'Q(s',a')
     expected_state_action_values = (next_state_values * GAMMA) + exp_batch["reward"]
 
-    # loss = loss_fcn(state_action_values, expected_state_action_values.unsqueeze(1))
     return state_action_values, expected_state_action_values
