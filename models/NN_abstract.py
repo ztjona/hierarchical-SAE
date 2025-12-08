@@ -30,6 +30,8 @@ class NN_abstract(ABC, torch.nn.Module):
     @abstractmethod
     def __init__(self, *args, **kwargs):
         super().__init__()
+        # Set device - use CUDA if available, otherwise CPU
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         pass
 
     @abstractmethod
@@ -75,6 +77,9 @@ class NN_abstract(ABC, torch.nn.Module):
         assert x_board.shape[0] == 1, "Batch size of 1 is required for prediction"
         self.eval()
         with torch.no_grad():
+            # Move inputs to the same device as the model
+            x_board = x_board.to(self.device)
+            x_piece = x_piece.to(self.device)
             qav_board, qav_piece = self.forward(x_board, x_piece)
 
             # Use tanh outputs directly for deterministic prediction
@@ -114,8 +119,11 @@ class NN_abstract(ABC, torch.nn.Module):
         """
         model = cls()
 
-        # specifically load only weights
-        model.load_state_dict(torch.load(weights_path, weights_only=True))
+        # specifically load only weights, map to appropriate device
+        model.load_state_dict(
+            torch.load(weights_path, weights_only=True, map_location=model.device)
+        )
+        model.to(model.device)  # Ensure model is on the correct device
 
         return model
 

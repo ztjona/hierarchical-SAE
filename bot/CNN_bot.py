@@ -102,7 +102,10 @@ class Quarto_bot(BotAI):
         else:
             logger.debug("Loading model with random weights")
             self.model = model_class()
-        logger.debug("Model loaded successfully")
+
+        # Move model to appropriate device
+        self.model.to(self.model.device)
+        logger.debug(f"Model loaded successfully on device: {self.model.device}")
 
         self._recalculate = True  # Recalculate the model on each turn
         self.selected_piece: Piece
@@ -137,10 +140,14 @@ class Quarto_bot(BotAI):
             else:
                 piece_onehot = np.zeros((1, 16), dtype=float)
 
+            # Create tensors and move to model's device
+            board_tensor = torch.from_numpy(board_matrix).float().to(self.model.device)
+            piece_tensor = torch.from_numpy(piece_onehot).float().to(self.model.device)
+
             self.board_pos_onehot_cached, self.select_piece_onehot_cached = (
                 self.model.predict(
-                    torch.from_numpy(board_matrix).float(),
-                    torch.from_numpy(piece_onehot).float(),
+                    board_tensor,
+                    piece_tensor,
                     TEMPERATURE=self.TEMPERATURE,
                     DETERMINISTIC=self.DETERMINISTIC,
                 )
@@ -217,6 +224,9 @@ class Quarto_bot(BotAI):
         # Get Q-values for all actions
         self.model.eval()
         with torch.no_grad():
+            # Move tensors to model device
+            state_board = state_board.to(self.model.device)
+            state_piece = state_piece.to(self.model.device)
             qav_board, qav_piece = self.model.forward(state_board, state_piece)
 
         # Extract Q-values for the actual actions taken
