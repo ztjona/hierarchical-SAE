@@ -26,6 +26,7 @@ def plot_boards_comp(
     fig_num: int = 3,
     DISPLAY_PLOT: bool = True,
     MAX_BOARDS: int = 6,
+    position: tuple[int, int] | None = (500, 0),
 ) -> None:
     """Plot pairs of boards side by side in a 2xn subplot grid (transposed).
 
@@ -40,6 +41,8 @@ def plot_boards_comp(
     MAX_BOARDS : int
         Maximum number of board pairs to display. If more pairs provided,
         randomly samples MAX_BOARDS pairs (default: 6)
+    position : tuple[int, int], optional
+        (x, y) position in pixels for top-left corner of figure window
     """
     n = len(boards_pair)
     if n == 0:
@@ -58,6 +61,14 @@ def plot_boards_comp(
         fig.clf()  # Clear figure content but keep the window
     else:
         fig = plt.figure(fig_num, figsize=(16, 9), constrained_layout=True)
+
+    # Set window position if specified
+    if position is not None:
+        try:
+            manager = fig.canvas.manager
+            manager.window.wm_geometry(f"+{position[0]}+{position[1]}")  # type: ignore
+        except:
+            pass  # Silently fail if backend doesn't support positioning
 
     axes = fig.subplots(2, n)
 
@@ -80,7 +91,8 @@ def plot_Qv_progress(
     rewards: torch.Tensor,
     fig_num: int = 4,
     DISPLAY_PLOT: bool = True,
-    done_v: torch.Tensor = None,
+    done_v: torch.Tensor | None = None,
+    position: tuple[int, int] | None = (0, 0),
 ) -> None:
     """Plot Q-value progression over epochs for each sample in the batch.
 
@@ -98,6 +110,8 @@ def plot_Qv_progress(
     done_v : torch.Tensor, optional
         Boolean tensor indicating whether each sample is a terminal state (batch_size,).
         Terminal states are plotted with higher prominence (thicker, more opaque lines).
+    position : tuple[int, int], optional
+        (x, y) position in pixels for top-left corner of figure window
     """
     if not q_values_history or len(q_values_history.get("q_place", [])) == 0:
         return
@@ -121,87 +135,59 @@ def plot_Qv_progress(
     else:
         fig = None  # Will be created below with appropriate size
 
-    # Handle large batch size (>15): plot 4 aggregated curves grouped by reward
+    # Handle large batch size (>15): plot 6 aggregated curves grouped by reward
     if batch_size > 15:
         if fig is None:
-            fig = plt.figure(fig_num, figsize=(16, 10), constrained_layout=True)
-        axes = fig.subplots(2, 2)
+            fig = plt.figure(fig_num, figsize=(18, 10), constrained_layout=True)
+
+        # Set window position if specified
+        if position is not None:
+            try:
+                manager = fig.canvas.manager
+                manager.window.wm_geometry(f"+{position[0]}+{position[1]}")  # type: ignore
+            except:
+                pass
+
+        axes = fig.subplots(2, 3)
 
         # Split samples by reward value
         win_indices = [i for i in range(batch_size) if rewards[i].item() == 1.0]
-        non_win_indices = [i for i in range(batch_size) if rewards[i].item() != 1.0]
+        draw_indices = [i for i in range(batch_size) if rewards[i].item() == 0.0]
+        loss_indices = [i for i in range(batch_size) if rewards[i].item() == -1.0]
 
-        # 1) Q_place for win samples (R=1)
-        ax = axes[0, 0]
-        for i in win_indices:
-            q_place_sample = [q[i].item() for q in q_place_history]
-            is_terminal = done_v[i].item() if done_v is not None else False
-            ax.plot(
-                epochs,
-                q_place_sample,
-                "-",
-                alpha=0.3 if is_terminal else 0.15,
-                linewidth=1.5 if is_terminal else 0.5,
-            )
-        ax.set_xlabel("Epoch")
-        ax.set_ylabel("Q-value")
-        ax.set_ylim(-1, 1)
-        ax.set_title("Q_place - Win Samples (R=1)")
-        ax.grid(True, alpha=0.3)
+        # Define plot configurations: (row, col, indices, q_history, title)
+        plot_configs = [
+            (0, 0, win_indices, q_place_history, "Q_place - R=1"),
+            (0, 1, draw_indices, q_place_history, "Q_place - R=0"),
+            (0, 2, loss_indices, q_place_history, "Q_place - R=-1"),
+            (1, 0, win_indices, q_select_history, "Q_select - R=1"),
+            (1, 1, draw_indices, q_select_history, "Q_select - R=0"),
+            (1, 2, loss_indices, q_select_history, "Q_select - R=-1"),
+        ]
 
-        # 2) Q_place for non-win samples (R=0 or R=-1)
-        ax = axes[0, 1]
-        for i in non_win_indices:
-            q_place_sample = [q[i].item() for q in q_place_history]
-            is_terminal = done_v[i].item() if done_v is not None else False
-            ax.plot(
-                epochs,
-                q_place_sample,
-                "-",
-                alpha=0.3 if is_terminal else 0.15,
-                linewidth=1.5 if is_terminal else 0.5,
-            )
-        ax.set_xlabel("Epoch")
-        ax.set_ylabel("Q-value")
-        ax.set_ylim(-1, 1)
-        ax.set_title("Q_place - Non-Win Samples (R≠1)")
-        ax.grid(True, alpha=0.3)
+        for row, col, indices, q_history, title in plot_configs:
+            ax = axes[row, col]
+            for i in indices:
+                q_sample = [q[i].item() for q in q_history]
+                is_terminal = done_v[i].item() if done_v is not None else False
+                ax.plot(
+                    epochs,
+                    q_sample,
+                    "-",
+                    alpha=0.3 if is_terminal else 0.15,
+                    linewidth=1.5 if is_terminal else 0.5,
+                )
 
-        # 3) Q_select for win samples (R=1)
-        ax = axes[1, 0]
-        for i in win_indices:
-            q_select_sample = [q[i].item() for q in q_select_history]
-            is_terminal = done_v[i].item() if done_v is not None else False
-            ax.plot(
-                epochs,
-                q_select_sample,
-                "-",
-                alpha=0.3 if is_terminal else 0.15,
-                linewidth=1.5 if is_terminal else 0.5,
-            )
-        ax.set_xlabel("Epoch")
-        ax.set_ylabel("Q-value")
-        ax.set_ylim(-1, 1)
-        ax.set_title("Q_select - Win Samples (R=1)")
-        ax.grid(True, alpha=0.3)
+            # Only show x-label on bottom row
+            if row == 1:
+                ax.set_xlabel("Epoch")
+            # Only show y-label on leftmost column
+            if col == 0:
+                ax.set_ylabel("Q-value")
 
-        # 4) Q_select for non-win samples (R=0 or R=-1)
-        ax = axes[1, 1]
-        for i in non_win_indices:
-            q_select_sample = [q[i].item() for q in q_select_history]
-            is_terminal = done_v[i].item() if done_v is not None else False
-            ax.plot(
-                epochs,
-                q_select_sample,
-                "-",
-                alpha=0.3 if is_terminal else 0.15,
-                linewidth=1.5 if is_terminal else 0.5,
-            )
-        ax.set_xlabel("Epoch")
-        ax.set_ylabel("Q-value")
-        ax.set_ylim(-1, 1)
-        ax.set_title("Q_select - Non-Win Samples (R≠1)")
-        ax.grid(True, alpha=0.3)
+            ax.set_ylim(-1, 1)
+            ax.set_title(title)
+            ax.grid(True, alpha=0.3)
 
     else:
         # Small batch size (<16): create suitable grid layout
@@ -221,6 +207,14 @@ def plot_Qv_progress(
             fig = plt.figure(
                 fig_num, figsize=(4 * ncols, 3 * nrows), constrained_layout=True
             )
+
+        # Set window position if specified
+        if position is not None:
+            try:
+                manager = fig.canvas.manager
+                manager.window.wm_geometry(f"+{position[0]}+{position[1]}")  # type: ignore
+            except:
+                pass
 
         axes = fig.subplots(nrows, ncols)
         axes = np.atleast_2d(axes)  # Ensure 2D array
@@ -254,8 +248,16 @@ def plot_Qv_progress(
                 linewidth=2,
                 label=f"Target R={target_reward:.1f}",
             )
-            ax.set_xlabel("Epoch")
-            ax.set_ylabel("Q-value")
+
+            # Only show x-label on bottom row
+            row_idx = i // ncols
+            col_idx = i % ncols
+            if row_idx == nrows - 1 or i >= batch_size - ncols:
+                ax.set_xlabel("Epoch")
+            # Only show y-label on leftmost column
+            if col_idx == 0:
+                ax.set_ylabel("Q-value")
+
             ax.set_ylim(-1, 1)
             ax.set_title(f"Sample {i}")
             ax.legend(fontsize=8)

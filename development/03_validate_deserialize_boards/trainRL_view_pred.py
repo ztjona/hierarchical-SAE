@@ -292,7 +292,9 @@ for e in tqdm(
         # b_state.name = (
         #     f"{idx}|selected|Player {(idx % 2) + 1} | R={exp['reward'][idx].item():.0f}"
         # )
-        b_next.name = f"Next Board| Q_place={q_place[idx].item():.2f}|Q_sel={q_select[idx].item():.2f}"
+        b_next.name = (
+            f"Next|Qput={q_place[idx].item():.2f}|Qsel={q_select[idx].item():.2f}"
+        )
         boards_with_qvalues.append((b_state, b_next))
 
     plot_boards_comp(*boards_with_qvalues)

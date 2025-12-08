@@ -29,9 +29,10 @@ def plot_win_rate(
     FIG_NAME=lambda epoch: f"{datetime.now().strftime('%Y%m%d_%H%M')}-win_rate_{epoch:04d}.svg",
     DISPLAY_PLOT: bool = False,
     fig_num: int = 1,
+    position: tuple[int, int] | None = (500, 600),
 ):
     """Plot win rate over epochs for multiple rivals.
-    
+
     Parameters
     ----------
     *args : tuple[str | int, list[float]]
@@ -48,6 +49,8 @@ def plot_win_rate(
         Whether to display the plot interactively (default: False)
     fig_num : int
         Figure number to use for plotting (default: 1)
+    position : tuple[int, int], optional
+        (x, y) position in pixels for top-left corner of figure window
     """
     if not DISPLAY_PLOT:
         plt.ioff()  # Disable interactive mode
@@ -59,27 +62,61 @@ def plot_win_rate(
     else:
         fig = plt.figure(fig_num, figsize=(8, 6))
 
+    # Set window position if specified
+    if position is not None:
+        try:
+            manager = fig.canvas.manager
+            manager.window.wm_geometry(f"+{position[0]}+{position[1]}")  # type: ignore
+        except:
+            pass
+
     for rival_name, win_rates in args:
+        epochs_arr = np.arange(len(win_rates))
+        win_rates_arr = np.array(win_rates)
+
+        # Scatter plot of raw data
         plt.scatter(
-            np.arange(len(win_rates)),
-            win_rates,
+            epochs_arr,
+            win_rates_arr,
             marker="o",  # type: ignore
             s=10,
             linestyle="",
             alpha=0.3,
             label=f"vs {rival_name}",
         )
+
         if SMOOTHING_WINDOW > 1 and len(win_rates) >= SMOOTHING_WINDOW:
+            # Calculate smoothed mean
             smoothed = np.convolve(
-                win_rates,
+                win_rates_arr,
                 np.ones(SMOOTHING_WINDOW) / SMOOTHING_WINDOW,
                 mode="valid",
             )
             offset = SMOOTHING_WINDOW - 1
-            plt.plot(
-                np.arange(offset // 2, len(smoothed) + offset // 2),
+            smoothed_epochs = np.arange(offset // 2, len(smoothed) + offset // 2)
+
+            # Calculate rolling std for error band
+            window_stds = []
+            for i in range(len(smoothed)):
+                window_data = win_rates_arr[i : i + SMOOTHING_WINDOW]
+                window_stds.append(np.std(window_data))
+            window_stds = np.array(window_stds)
+
+            # Plot smoothed line
+            line = plt.plot(
+                smoothed_epochs,
                 smoothed,
-                alpha=0.6,
+                alpha=0.8,
+                linewidth=2,
+            )[0]
+
+            # Add std error band with same color as line
+            plt.fill_between(
+                smoothed_epochs,
+                smoothed - window_stds,
+                smoothed + window_stds,
+                alpha=0.2,
+                color=line.get_color(),
             )
 
     plt.xlabel("Training epochs")
@@ -108,6 +145,7 @@ def plot_loss(
     FIG_NAME=lambda epoch: f"{datetime.now().strftime('%Y%m%d_%H%M')}-loss_{epoch:04d}.svg",
     DISPLAY_PLOT: bool = False,
     fig_num: int = 2,
+    position: tuple[int, int] | None = (0, 600),
 ):
     """
     Plot average loss per epoch with standard deviation error bands.
@@ -115,7 +153,7 @@ def plot_loss(
     Parameters
     ----------
     loss_data : dict[str, list[float | int]]
-        Dictionary with 'loss_values' (list of all iteration losses) and 
+        Dictionary with 'loss_values' (list of all iteration losses) and
         'epoch_values' (list of iteration indices marking epoch boundaries)
     FREQ_EPOCH_SAVING : int
         If -1, no saving. Otherwise, save figure every n epochs (default: 200)
@@ -127,6 +165,8 @@ def plot_loss(
         Whether to display the plot interactively (default: False)
     fig_num : int
         Figure number to use for plotting (default: 2)
+    position : tuple[int, int], optional
+        (x, y) position in pixels for top-left corner of figure window
     """
     if not DISPLAY_PLOT:
         plt.ioff()  # Disable interactive mode
@@ -139,6 +179,14 @@ def plot_loss(
         fig.clf()  # Clear figure content but keep the window
     else:
         fig = plt.figure(fig_num, figsize=(10, 5))
+
+    # Set window position if specified
+    if position is not None:
+        try:
+            manager = fig.canvas.manager
+            manager.window.wm_geometry(f"+{position[0]}+{position[1]}")  # type: ignore
+        except:
+            pass
 
     # Calculate mean and std for each epoch
     n_epochs = len(epoch_values)
@@ -164,15 +212,16 @@ def plot_loss(
     epoch_stds = np.array(epoch_stds)
     epochs = np.arange(n_epochs)
 
-    # Plot mean loss line
-    plt.plot(epochs, epoch_means, "o-", alpha=0.8, linewidth=2, label="Mean loss")
-
-    # Plot standard deviation as error band
+    # Plot mean loss line with std error band
+    line = plt.plot(
+        epochs, epoch_means, ".-", alpha=0.8, linewidth=2, label="Mean loss"
+    )[0]
     plt.fill_between(
         epochs,
         epoch_means - epoch_stds,
         epoch_means + epoch_stds,
         alpha=0.3,
+        color=line.get_color(),
         label="±1 std dev",
     )
 
