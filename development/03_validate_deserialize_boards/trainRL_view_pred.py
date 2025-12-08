@@ -10,6 +10,7 @@ from torchrl.data.replay_buffers.storages import LazyTensorStorage
 from torchrl.data.replay_buffers.samplers import SamplerWithoutReplacement
 from bot.CNN_bot import Quarto_bot
 from models.CNN1 import QuartoCNN
+from models.CNN_uncoupled import QuartoCNN as QuartoCNN_uncoupled
 from QuartoRL import (
     gen_experience,
     run_contest,
@@ -31,8 +32,10 @@ logger.info("Imports done.")
 
 # STARTING_NET = "CHECKPOINTS//REF//20251023_1649-_E02_win_rate_epoch_0022.pt"
 STARTING_NET = None  # Set to None to start with random weights
-EXPERIMENT_NAME = "Validate01"
+EXPERIMENT_NAME = "Memo_b2_uncoupled"
 CHECKPOINT_FOLDER = f"./CHECKPOINTS/{EXPERIMENT_NAME}/"
+ARCHITECTURE = QuartoCNN
+# ARCHITECTURE = QuartoCNN_uncoupled
 
 # The bot at the end of each epoch will be evaluated against a limited number of rivals known as BASELINES.
 BASELINES = [
@@ -41,13 +44,21 @@ BASELINES = [
         "path": "CHECKPOINTS//REF//20251023_1649-_E02_win_rate_epoch_0022.pt",
         "name": "bot_good_WR_B",
         "bot": Quarto_bot,
-        "params": {"deterministic": False, "temperature": 0.1},
+        "params": {
+            "deterministic": False,
+            "temperature": 0.1,
+            "model_class": QuartoCNN,
+        },
     },
     {
         "path": "CHECKPOINTS//EXP_id03//20250922_1247-EXP_id03_epoch_0000.pt",
         "name": "bot_random",
         "bot": Quarto_bot,
-        "params": {"deterministic": False, "temperature": 0.1},
+        "params": {
+            "deterministic": False,
+            "temperature": 0.1,
+            "model_class": QuartoCNN,
+        },
     },
     # {
     #     "path": "CHECKPOINTS//others//20250930_1010-EXP_id03_epoch_0017.pt",
@@ -127,8 +138,8 @@ q_values_history: dict[str, list] = {
 
 # ###########################
 torch.manual_seed(5)
-policy_net = QuartoCNN()
-target_net = QuartoCNN()
+policy_net = ARCHITECTURE()
+target_net = ARCHITECTURE()
 
 # Load starting checkpoint if provided
 if STARTING_NET is not None:

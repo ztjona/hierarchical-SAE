@@ -18,6 +18,7 @@ import torch
 
 from datetime import datetime
 from os import path, makedirs
+import torch.nn.functional as F
 
 
 class NN_abstract(ABC, torch.nn.Module):
@@ -71,21 +72,22 @@ class NN_abstract(ABC, torch.nn.Module):
             x_board.shape[0] == x_piece.shape[0]
         ), "Input tensors must have the same batch size"
 
+        assert x_board.shape[0] == 1, "Batch size of 1 is required for prediction"
         self.eval()
         with torch.no_grad():
             qav_board, qav_piece = self.forward(x_board, x_piece)
 
             # Use tanh outputs directly for deterministic prediction
             if DETERMINISTIC:
+                # Independent sorting for board positions and pieces
                 board_indices = torch.argsort(qav_board, descending=True, dim=1)
                 piece_indices = torch.argsort(qav_piece, descending=True, dim=1)
                 return board_indices, piece_indices
             else:
                 # For stochastic prediction, use softmax over tanh outputs and sample
-                import torch.nn.functional as F
-
                 board_probs = F.softmax(qav_board / TEMPERATURE, dim=1)
                 piece_probs = F.softmax(qav_piece / TEMPERATURE, dim=1)
+                # Independent sorting for board positions and pieces
                 board_indices = torch.multinomial(
                     board_probs,
                     board_probs.shape[1],  # all possible combinations

@@ -38,9 +38,9 @@ def contest_2_win_rate(
 def run_contest(
     player: BotAI,
     rivals: list[str],
-    rival_class: type[BotAI],
+    rival_class: type[BotAI] | list[type[BotAI]],
     rival_names: list[str | int] = [],
-    rival_options: dict = {},
+    rival_options: dict | list[dict] = {},
     matches: int = 100,
     rivals_clip: int = -1,
     verbose: bool = True,
@@ -51,13 +51,38 @@ def run_contest(
     Args:
         player (BotAI): The player bot.
         rivals (list[str]): List of file paths to rival bots.
-        rival_class (type[BotAI]): Class type of the rival bots.
+        rival_class (type[BotAI] | list[type[BotAI]]): Class type of the rival bots.
+            If a single type, all rivals use the same class.
+            If a list, must match the length of rivals list.
+        rival_names (list[str | int]): List of names for the rivals.
+        rival_options (dict | list[dict]): Options to pass to rival bot constructors.
+            If a single dict, all rivals use the same options.
+            If a list, must match the length of rivals list.
         matches (int): Total number of matches to play against each rival.
         rivals_clip (int): Limit the number of rivals to consider. -1 means no limit.
         verbose (bool): Whether to print detailed logs.
+        mode_2x2 (bool): Whether to use 2x2 victory mode.
+        PROGRESS_MESSAGE (str): Message to display in progress bar.
     """
     n_rivals = len(rivals)
     logger.debug(f"Running contest with {n_rivals} rivals, {matches} matches")
+
+    # Normalize rival_class and rival_options to lists
+    if not isinstance(rival_class, list):
+        rival_class_list = [rival_class] * n_rivals
+    else:
+        rival_class_list = rival_class
+        assert (
+            len(rival_class_list) == n_rivals
+        ), f"rival_class list length ({len(rival_class_list)}) must match rivals length ({n_rivals})"
+
+    if not isinstance(rival_options, list):
+        rival_options_list = [rival_options] * n_rivals
+    else:
+        rival_options_list = rival_options
+        assert (
+            len(rival_options_list) == n_rivals
+        ), f"rival_options list length ({len(rival_options_list)}) must match rivals length ({n_rivals})"
 
     selected = range(n_rivals)  # Default to all rivals
     if rivals_clip == -1:
@@ -79,8 +104,13 @@ def run_contest(
     results: dict[int | str, dict[str, int]] = defaultdict(
         lambda: {"wins": 0, "losses": 0, "draws": 0}
     )
-    for rival_name, rival_file in tqdm(rivals_selected.items(), desc=PROGRESS_MESSAGE):
-        rival = rival_class(model_path=rival_file, **rival_options)
+    for idx, (rival_name, rival_file) in enumerate(
+        tqdm(rivals_selected.items(), desc=PROGRESS_MESSAGE)
+    ):
+        rival_idx = list(rivals_selected.keys()).index(rival_name)
+        rival = rival_class_list[rival_idx](
+            model_path=rival_file, **rival_options_list[rival_idx]
+        )
 
         logger.debug(f"Playing against rival {rival_name}/{len(rivals)}: {rival.name}")
         _, win_rate_p1 = play_games(

@@ -221,7 +221,7 @@ def gen_experience(
             Returns only TensorDict with experience data
         If COLLECT_BOARDS is True:
             Returns tuple of (TensorDict, list of board pairs)
-    
+
     TensorDict contains:
         - state_board: Board states (N, 16, 4, 4)
         - state_piece: Piece one-hot vectors (N, 16)
@@ -231,7 +231,7 @@ def gen_experience(
         - done: Terminal state flags (N,)
         - next_state_board: Next board states (N, 16, 4, 4)
         - next_state_piece: Next piece vectors (N, 16)
-    
+
     Where N is the total number of states collected (varies by matches).
     """
     logger.debug("Generating experience...")
@@ -332,7 +332,7 @@ def DQN_training_step(
     exp_batch: TensorDict,
 ):
     """Perform one DQN training step using the given batch of experiences.
-    
+
     Parameters
     ----------
     policy_net : NN_abstract
@@ -343,7 +343,7 @@ def DQN_training_step(
         Discount factor for future rewards
     exp_batch : TensorDict
         Batch of experiences with state, action, reward, next_state, done
-    
+
     Returns
     -------
     state_action_values : torch.Tensor
@@ -374,7 +374,9 @@ def DQN_training_step(
 
     # --- Create masks for different experience types
     first_move_mask = action_pos == -1  # First move has no placement (empty board)
-    final_move_mask = action_sel == -1  # Terminal states have no piece selection (game ended)
+    final_move_mask = (
+        action_sel == -1
+    )  # Terminal states have no piece selection (game ended)
     non_terminal_mask = ~final_move_mask
     terminal_mask = exp_batch["done"]
 
@@ -383,7 +385,9 @@ def DQN_training_step(
         ~(first_move_mask & final_move_mask)
     ).all(), "Invalid experience with both first and final move."
 
-    assert terminal_mask[final_move_mask].all(), "All experiences with action_sel=-1 must be terminal states."
+    assert terminal_mask[
+        final_move_mask
+    ].all(), "All experiences with action_sel=-1 must be terminal states."
 
     # Extract valid action indices (excluding -1 values)
     action_pos_valid = action_pos[~first_move_mask]
@@ -399,12 +403,19 @@ def DQN_training_step(
         1, action_sel_valid.unsqueeze(1).type(torch.int64)
     ).squeeze(1)
 
-    # Combine Q-values: average of placement and selection Q-values
-    # Note: For first moves, only selection counts (place=0)
-    #       For terminal states, only placement counts (select=0)
+    # Combine Q-values as a joint action
+    # Each turn consists of TWO decisions: place AND select
+    # The value of the state-action should reflect BOTH decisions
+    #
+    # For special cases:
+    # - First moves (place=-1): placement gets Q=0, so only selection matters
+    # - Terminal states (select=-1): selection gets Q=0, so only placement matters
+    #
+    # Use AVERAGE to represent the joint action value
+    # This is mathematically sound: the expected return depends on BOTH actions
     state_action_values = (state_place_action_values + state_sel_action_values) / 2
 
-    # ------- Compute V(s_{t+1}) for all next states using target network
+    # Compute V(s_{t+1}) for all next states using target network
     # Initialize with zeros (terminal states have V=0 by definition)
     next_state_values = torch.zeros(exp_batch.shape, device=exp_batch["reward"].device)
 
@@ -414,7 +425,7 @@ def DQN_training_step(
             exp_batch["next_state_board"][non_terminal_mask],
             exp_batch["next_state_piece"][non_terminal_mask],
         )
-        # Combine Q-values using same method as state_action_values
+        # Combine using average (joint action value)
         _next_val = (_next_state_pos + _next_state_piece) / 2
         # Take maximum Q-value across all possible actions
         next_state_values[non_terminal_mask] = _next_val.max(dim=1).values
