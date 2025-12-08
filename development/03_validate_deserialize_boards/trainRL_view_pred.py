@@ -107,6 +107,12 @@ TEMPERATURE_EXPLORE = 2  # view test of temperature
 TEMPERATURE_EXPLOIT = 0.1
 
 FREQ_EPOCH_SAVING = 100  # save model, figures every n epochs
+
+
+# Plots are shown every epoch until this number of epochs. After that, only every
+# FREQ_EPOCH_PLOT_SHOW epochs. At the end, all plots are shown again.
+FREQ_EPOCH_PLOT_SHOW = 30
+
 # in iters if >= N_ITERS show epoch lines in loss plot
 SMOOTHING_WINDOW = 10
 
@@ -290,38 +296,14 @@ for e in tqdm(
             target_net.load_state_dict(target_net_state_dict)
             target_net.eval()  # Ensure target network stays in eval mode
 
+    # ------- END OF EPOCH -------
     # Evaluate Q-values for the experience batch
     q_place, q_select = p1.evaluate(exp)
 
-    # Store Q-values for tracking progression
     q_values_history["q_place"].append(q_place)
     q_values_history["q_select"].append(q_select)
 
-    # Update board names with Q-values and rewards
-    boards_with_qvalues = []
-    for idx, (b_state, b_next) in enumerate(boards):  # type: ignore
-        # b_state.name = (
-        #     f"{idx}|selected|Player {(idx % 2) + 1} | R={exp['reward'][idx].item():.0f}"
-        # )
-        b_next.name = (
-            f"Next|Qput={q_place[idx].item():.2f}|Qsel={q_select[idx].item():.2f}"
-        )
-        boards_with_qvalues.append((b_state, b_next))
-
-    plot_boards_comp(*boards_with_qvalues)
-    plot_Qv_progress(
-        q_values_history,
-        exp["reward"],
-        fig_num=4,
-        DISPLAY_PLOT=True,
-        done_v=exp["done"],
-    )
-    # ------- END OF EPOCH -------
     loss_data["epoch_values"].append(step_i)
-    # Save the model at the end of each epoch
-    _fname = CKPT_NAME_GEN(e + 1)
-    policy_net.export_model(_fname, checkpoint_folder=CHECKPOINT_FOLDER)
-    # checkpoints_files.append(_f_fname)
 
     # We're also using a learning rate scheduler. Like the gradient clipping,
     # this is a nice-to-have but nothing necessary for PPO to work.
@@ -357,9 +339,14 @@ for e in tqdm(
             win_rate[rival_name] = []
         win_rate[rival_name].append(wr)
 
-    # store results
-    epochs_results.append(dict(contest_results))
     # ------- SAVE RESULTS -----------
+    # --- Save the model at the end of each epoch
+    _fname = CKPT_NAME_GEN(e + 1)
+    policy_net.export_model(_fname, checkpoint_folder=CHECKPOINT_FOLDER)
+
+    # ------ Store results
+    epochs_results.append(dict(contest_results))
+
     if (e + 1) % FREQ_EPOCH_SAVING == 0:
         with open(f"{EXPERIMENT_NAME}.pkl", "wb") as f:
             pickle.dump(
@@ -367,25 +354,39 @@ for e in tqdm(
                     "epochs_results": epochs_results,
                     "loss_values": loss_data,
                     "win_rate": win_rate,
+                    "q_values_history": q_values_history,
                 },
                 f,
             )
 
     # ------- PLOT RESULTS -----------
-    plot_win_rate(
-        *win_rate.items(),
-        FREQ_EPOCH_SAVING=FREQ_EPOCH_SAVING,
-        FOLDER_SAVE=CHECKPOINT_FOLDER,
-        SMOOTHING_WINDOW=SMOOTHING_WINDOW,
-        DISPLAY_PLOT=True,
-    )
-    # plot_contest_results(epochs_results)
-    plot_loss(
-        loss_data,
-        FREQ_EPOCH_SAVING=FREQ_EPOCH_SAVING,
-        FOLDER_SAVE=CHECKPOINT_FOLDER,
-        DISPLAY_PLOT=True,
-    )
+    if (e + 1) < FREQ_EPOCH_PLOT_SHOW or (e + 1) % FREQ_EPOCH_PLOT_SHOW == 0:
+        logger.debug("Plotting results...")
+        plot_boards_comp(*boards, q_place=q_place, q_select=q_select)
+
+        plot_Qv_progress(
+            q_values_history,
+            exp["reward"],
+            fig_num=4,
+            DISPLAY_PLOT=True,
+            done_v=exp["done"],
+        )
+
+        plot_win_rate(
+            *win_rate.items(),
+            FREQ_EPOCH_SAVING=FREQ_EPOCH_SAVING,
+            FOLDER_SAVE=CHECKPOINT_FOLDER,
+            SMOOTHING_WINDOW=SMOOTHING_WINDOW,
+            DISPLAY_PLOT=True,
+        )
+        # plot_contest_results(epochs_results)
+        plot_loss(
+            loss_data,
+            FREQ_EPOCH_SAVING=FREQ_EPOCH_SAVING,
+            FOLDER_SAVE=CHECKPOINT_FOLDER,
+            DISPLAY_PLOT=True,
+        )
+        logger.debug("Plots updated.")
 
 
 logger.info("Training completed.")

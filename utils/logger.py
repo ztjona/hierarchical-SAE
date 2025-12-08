@@ -42,7 +42,9 @@ formatter = ColorFormatter(
 )
 handler.setFormatter(formatter)
 
-logging.basicConfig(handlers=[handler], level=logging.INFO)
 logger = logging.getLogger("TrainRL")
+logger.setLevel(logging.DEBUG)
+logger.addHandler(handler)
+logger.propagate = False  # Prevent duplicate logs from root logger
 logger.debug("Creating logger for TrainRL")
 logger.debug(datetime.now())

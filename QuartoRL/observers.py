@@ -23,6 +23,8 @@ import random
 
 def plot_boards_comp(
     *boards_pair: tuple[Board, Board],
+    q_place: torch.Tensor,
+    q_select: torch.Tensor,
     fig_num: int = 3,
     DISPLAY_PLOT: bool = True,
     MAX_BOARDS: int = 6,
@@ -65,7 +67,7 @@ def plot_boards_comp(
     # Set window position if specified
     if position is not None:
         try:
-            manager = fig.canvas.manager
+            manager = fig.canvas.manager  # type: ignore
             manager.window.wm_geometry(f"+{position[0]}+{position[1]}")  # type: ignore
         except:
             pass  # Silently fail if backend doesn't support positioning
@@ -78,8 +80,8 @@ def plot_boards_comp(
 
     # Plot each pair (transposed: rows are board states, columns are pairs)
     for i, (b1, b2) in enumerate(boards_pair):
-        b1.plot(title=b1.name, ax=axes[0, i], show=False)
-        b2.plot(title=b2.name, ax=axes[1, i], show=False)
+        b1.plot(title=b1.name, ax=axes[0, i], show=False)  # type: ignore
+        b2.plot(title=b2.name, ax=axes[1, i], show=False)  # type: ignore
 
     if DISPLAY_PLOT:
         plt.draw()
@@ -143,7 +145,7 @@ def plot_Qv_progress(
         # Set window position if specified
         if position is not None:
             try:
-                manager = fig.canvas.manager
+                manager = fig.canvas.manager  # type: ignore
                 manager.window.wm_geometry(f"+{position[0]}+{position[1]}")  # type: ignore
             except:
                 pass
@@ -166,7 +168,7 @@ def plot_Qv_progress(
         ]
 
         for row, col, indices, q_history, title in plot_configs:
-            ax = axes[row, col]
+            ax = axes[row, col]  # type: ignore
             for i in indices:
                 q_sample = [q[i].item() for q in q_history]
                 is_terminal = done_v[i].item() if done_v is not None else False
@@ -211,13 +213,13 @@ def plot_Qv_progress(
         # Set window position if specified
         if position is not None:
             try:
-                manager = fig.canvas.manager
+                manager = fig.canvas.manager  # type: ignore
                 manager.window.wm_geometry(f"+{position[0]}+{position[1]}")  # type: ignore
             except:
                 pass
 
         axes = fig.subplots(nrows, ncols)
-        axes = np.atleast_2d(axes)  # Ensure 2D array
+        axes = np.atleast_2d(axes)  # type: ignore # Ensure 2D array
         axes_flat = axes.transpose().flatten()
 
         # Plot each sample (Q_place and Q_select on same axis)

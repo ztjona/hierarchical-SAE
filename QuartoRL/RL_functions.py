@@ -192,7 +192,7 @@ def gen_experience(
     mode_2x2: bool = False,
     REWARD_FUNCTION_TYPE: str = "propagate",
     COLLECT_BOARDS: bool = False,
-) -> TensorDict | tuple[TensorDict, list[Board]]:
+) -> TensorDict | tuple[TensorDict, list[tuple[Board, Board]]]:
     """
     Generates experience by having two bots play against each other. The experience is returned as a TensorDict.
     ## Parameters
