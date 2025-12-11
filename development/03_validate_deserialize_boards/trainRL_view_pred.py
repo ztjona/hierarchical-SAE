@@ -25,6 +25,7 @@ from tqdm.auto import tqdm
 from pprint import pformat
 import pickle
 from colorama import init, Fore, Style
+import socket
 import matplotlib.pyplot as plt
 
 # ---- PARAMS ----
@@ -32,14 +33,16 @@ logger.info("Imports done.")
 
 # STARTING_NET = "CHECKPOINTS//REF//20251023_1649-_E02_win_rate_epoch_0022.pt"
 STARTING_NET = None  # Set to None to start with random weights
-EXPERIMENT_NAME = "Memo_b3_uncoupled"
+EXPERIMENT_NAME = "REWARD"
 CHECKPOINT_FOLDER = f"./CHECKPOINTS/{EXPERIMENT_NAME}/"
 # ARCHITECTURE = QuartoCNN
 ARCHITECTURE = QuartoCNN_uncoupled
+REWARD_FUNCTION = "propagate"  # "final", "propagate", "discount"
 
 # if True, experience is generated at the beginning of each epoch
 # if False, experience is generated only at the first epoch and reused for the rest of epochs
 GEN_EXPERIENCE_BY_EPOCH = True
+# GEN_EXPERIENCE_BY_EPOCH = False
 
 # The bot at the end of each epoch will be evaluated against a limited number of rivals known as BASELINES.
 BASELINES = [
@@ -75,22 +78,22 @@ mode_2x2 = True
 # every epoch experience is generated with a new bot instance, models are saved at the end of each epoch
 EPOCHS = 1500
 
-MATCHES_PER_EPOCH = 500  # number self-play matches per epoch
+MATCHES_PER_EPOCH = 30  # number self-play matches per epoch
 # movs per match (~10) * #_matches per epoch (max 16, but avg less)
 STEPS_PER_EPOCH = 10 * MATCHES_PER_EPOCH
 # number of times the network is updated per epoch
 ITER_PER_EPOCH = STEPS_PER_EPOCH // BATCH_SIZE
 
-# EPOCHs x STEPS_PER_EPOCH, DATA from the last 50 epochs
+# EPOCHs x STEPS_PER_EPOCH, DATA from the last _#_ epochs
 REPLAY_SIZE = 50 * STEPS_PER_EPOCH
 
 # update target network every n batches processed, ~x3/epoch
 N_BATCHS_2_UPDATE_TARGET = ITER_PER_EPOCH // 3
 
 # number of last states to consider in the experience generation at the beginning of training
-N_LAST_STATES_INIT: int = 3
+N_LAST_STATES_INIT: int = 5
 # number of last states to consider in the experience generation at the end of training. -1 means all states
-N_LAST_STATES_FINAL = 3  # 16 is all states in 4x4 board
+N_LAST_STATES_FINAL = 5  # 16 is all states in 4x4 board
 
 # temperature for exploration, higher values lead to more exploration
 TEMPERATURE_EXPLORE = 2  # view test of temperature
@@ -103,7 +106,7 @@ FREQ_EPOCH_SAVING = 100  # save model, figures every n epochs
 
 # Plots are shown every epoch until this number of epochs. After that, only every
 # FREQ_EPOCH_PLOT_SHOW epochs. At the end, all plots are shown again.
-FREQ_EPOCH_PLOT_SHOW = 30
+FREQ_EPOCH_PLOT_SHOW = 10
 
 # in iters if >= N_ITERS show epoch lines in loss plot
 SMOOTHING_WINDOW = 10
@@ -116,6 +119,7 @@ TAU = 0.01  # recommended value by CHATGPT
 # TAU = 0.005
 GAMMA = 0.99
 
+logger.info(f"PC name: {socket.gethostname()}")
 logger.info(f"Experiment name:\t{EXPERIMENT_NAME}")
 logger.info(
     f"Train conf.:\t{EPOCHS=}, {BATCH_SIZE=}, {LR=}, {LR_F=}, {GAMMA=}, {TAU=}, {MAX_GRAD_NORM=}"
@@ -235,7 +239,7 @@ for e in tqdm(
     )
     logger.info(f"Using n_last_states={n_last_states} for epoch {e + 1}")
 
-    if GEN_EXPERIENCE_BY_EPOCH:
+    if GEN_EXPERIENCE_BY_EPOCH or e == 0:
         logger.info("Generating experience...")
         # ---- GENERATE EXPERIENCE by SELF-PLAY----
         exp, boards = gen_experience(
@@ -244,14 +248,15 @@ for e in tqdm(
             n_last_states=n_last_states,
             number_of_matches=MATCHES_PER_EPOCH,
             mode_2x2=mode_2x2,
+            REWARD_FUNCTION_TYPE=REWARD_FUNCTION,
             PROGRESS_MESSAGE=f"{Fore.YELLOW}Generating experience for epoch {e + 1}{Style.RESET_ALL}",
             COLLECT_BOARDS=True,
         )
+        exp_batch = exp
         replay_buffer.extend(exp)  # type: ignore
         logger.info("Initial experience generated.")
     else:
         logger.info("Reusing same previous experience... Ignoring BATCH_SIZE.")
-        exp_batch = exp
 
     for i in range(ITER_PER_EPOCH):
         pbar.update(1)
@@ -369,7 +374,7 @@ for e in tqdm(
             )
 
     # ------- PLOT RESULTS -----------
-    if (e + 1) < FREQ_EPOCH_PLOT_SHOW or (e + 1) % FREQ_EPOCH_PLOT_SHOW == 0:
+    if (e + 1) % FREQ_EPOCH_PLOT_SHOW == 0 or (e + 1) == EPOCHS:
         logger.debug("Plotting results...")
         plot_boards_comp(*boards, q_place=q_place, q_select=q_select)
 

@@ -1,10 +1,9 @@
-analysis/BT1/results_BT1.pkl
-configs_debug.py
 .vscode/
 partidas_guardadas/
 chat/
 logs/
 
+*pkl
 # images
 *.svg
 

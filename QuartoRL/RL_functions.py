@@ -16,10 +16,8 @@ from tensordict import TensorDict
 from quartopy import play_games, BotAI, Board
 
 import torch
-from torch.nn import SmoothL1Loss
 import numpy as np
 import pandas as pd
-from tqdm.auto import tqdm
 from models import NN_abstract
 
 import numpy as np
@@ -145,14 +143,18 @@ def convert_2_state_action_reward(match_data, REWARD_FUNCTION_TYPE: str = "propa
     # Apply reward function
     match REWARD_FUNCTION_TYPE:
         case "final":
-            reward = [0] * (_num_states)
-            reward.append(R)
+            reward = [0] * (_num_states - 2)
+            if R == 0:
+                reward.extend([0, 0])
+            else:
+                # last move is winning move for a player
+                reward.extend([-1, 1])
         case "propagate":
             reward = [R if i % 2 == 0 else R_2 for i in range(_num_states)]
         case "discount":
             gamma = 0.8
             reward = [
-                R * (gamma**i) * (-1) ** (i % 2 == 1)
+                1 * (gamma**i) * (-1) ** (i % 2 == 1)
                 for i in reversed(range(_num_states))
             ]
         case _:
