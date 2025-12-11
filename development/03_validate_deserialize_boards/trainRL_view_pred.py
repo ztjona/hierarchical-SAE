@@ -22,7 +22,7 @@ from QuartoRL import (
     plot_Qv_progress,
 )
 from tqdm.auto import tqdm
-from pprint import pprint
+from pprint import pformat
 import pickle
 from colorama import init, Fore, Style
 import matplotlib.pyplot as plt
@@ -32,10 +32,14 @@ logger.info("Imports done.")
 
 # STARTING_NET = "CHECKPOINTS//REF//20251023_1649-_E02_win_rate_epoch_0022.pt"
 STARTING_NET = None  # Set to None to start with random weights
-EXPERIMENT_NAME = "Memo_b2_uncoupled"
+EXPERIMENT_NAME = "Memo_b3_uncoupled"
 CHECKPOINT_FOLDER = f"./CHECKPOINTS/{EXPERIMENT_NAME}/"
-ARCHITECTURE = QuartoCNN
-# ARCHITECTURE = QuartoCNN_uncoupled
+# ARCHITECTURE = QuartoCNN
+ARCHITECTURE = QuartoCNN_uncoupled
+
+# if True, experience is generated at the beginning of each epoch
+# if False, experience is generated only at the first epoch and reused for the rest of epochs
+GEN_EXPERIENCE_BY_EPOCH = True
 
 # The bot at the end of each epoch will be evaluated against a limited number of rivals known as BASELINES.
 BASELINES = [
@@ -60,18 +64,6 @@ BASELINES = [
             "model_class": QuartoCNN,
         },
     },
-    # {
-    #     "path": "CHECKPOINTS//others//20250930_1010-EXP_id03_epoch_0017.pt",
-    #     "name": "bot_Michael",
-    #     "bot": Quarto_bot,
-    #     "params": {"deterministic": False, "temperature": 0.1},
-    # },
-    # {
-    #     "path": "CHECKPOINTS//others//20251006_2218-EXP_id03_epoch_0010.pt",
-    #     "name": "bot_Michael2",
-    #     "bot": Quarto_bot,
-    #     "params": {"deterministic": False, "temperature": 0.1},
-    # },
 ]
 N_MATCHES_EVAL = 30  # number of matches to evaluate the bot at the end of each epoch for the selected BASELINES
 
@@ -84,21 +76,21 @@ mode_2x2 = True
 EPOCHS = 1500
 
 MATCHES_PER_EPOCH = 500  # number self-play matches per epoch
-# ~x10 of matches_per_epoch, used to generate experience
+# movs per match (~10) * #_matches per epoch (max 16, but avg less)
 STEPS_PER_EPOCH = 10 * MATCHES_PER_EPOCH
 # number of times the network is updated per epoch
 ITER_PER_EPOCH = STEPS_PER_EPOCH // BATCH_SIZE
 
-# ~EPOCHs x STEPS_PER_EPOCH, info from last epochs
+# EPOCHs x STEPS_PER_EPOCH, DATA from the last 50 epochs
 REPLAY_SIZE = 50 * STEPS_PER_EPOCH
 
 # update target network every n batches processed, ~x3/epoch
-N_BATCHS_2_UPDATE_TARGET = ITER_PER_EPOCH // 2
+N_BATCHS_2_UPDATE_TARGET = ITER_PER_EPOCH // 3
 
 # number of last states to consider in the experience generation at the beginning of training
-N_LAST_STATES_INIT: int = 5
+N_LAST_STATES_INIT: int = 3
 # number of last states to consider in the experience generation at the end of training. -1 means all states
-N_LAST_STATES_FINAL = 5  # 16 is all states in 4x4 board
+N_LAST_STATES_FINAL = 3  # 16 is all states in 4x4 board
 
 # temperature for exploration, higher values lead to more exploration
 TEMPERATURE_EXPLORE = 2  # view test of temperature
@@ -124,8 +116,14 @@ TAU = 0.01  # recommended value by CHATGPT
 # TAU = 0.005
 GAMMA = 0.99
 
-# from configs_debug import * # Uncomment to use debug configs
-
+logger.info(f"Experiment name:\t{EXPERIMENT_NAME}")
+logger.info(
+    f"Train conf.:\t{EPOCHS=}, {BATCH_SIZE=}, {LR=}, {LR_F=}, {GAMMA=}, {TAU=}, {MAX_GRAD_NORM=}"
+)
+logger.info(f"Exp. gen.:\t{MATCHES_PER_EPOCH=}, {STEPS_PER_EPOCH=}, {REPLAY_SIZE=}")
+logger.info(f"Network updates:\t{ITER_PER_EPOCH=}, {N_BATCHS_2_UPDATE_TARGET=}")
+logger.info(f"Exploration:\t{TEMPERATURE_EXPLORE=}, {TEMPERATURE_EXPLOIT=}")
+logger.info(f"N_LAST_STATES:\tINIT={N_LAST_STATES_INIT}, FINAL={N_LAST_STATES_FINAL}")
 # ###########################
 # Unpack baselines into rivals for evaluation
 # limit the number of rivals for evaluation, -1 means no limit
@@ -151,6 +149,7 @@ logger.info(f"Using device: {device}")
 
 policy_net = ARCHITECTURE()
 target_net = ARCHITECTURE()
+logger.info(f"Architecture: {policy_net.name}")
 
 # Move models to device
 policy_net.to(device)
@@ -177,9 +176,6 @@ target_net.load_state_dict(policy_net.state_dict())
 
 CKPT_NAME_GEN = lambda epoch: f"{EXPERIMENT_NAME}_E_{epoch:04d}"
 policy_net.export_model(CKPT_NAME_GEN(0), CHECKPOINT_FOLDER)
-
-# list of file names by epoch
-# checkpoints_files: list[str] = [_fcheckpoint_name]
 
 # ###########################
 replay_buffer = ReplayBuffer(
@@ -239,8 +235,8 @@ for e in tqdm(
     )
     logger.info(f"Using n_last_states={n_last_states} for epoch {e + 1}")
 
-    if e == 0:
-        logger.info("Generating initial experience...")
+    if GEN_EXPERIENCE_BY_EPOCH:
+        logger.info("Generating experience...")
         # ---- GENERATE EXPERIENCE by SELF-PLAY----
         exp, boards = gen_experience(
             p1_bot=p1,
@@ -252,15 +248,17 @@ for e in tqdm(
             COLLECT_BOARDS=True,
         )
         replay_buffer.extend(exp)  # type: ignore
-
+        logger.info("Initial experience generated.")
     else:
-        logger.info("Reusing same previous experience...")
-        # exp = exp # ...
+        logger.info("Reusing same previous experience... Ignoring BATCH_SIZE.")
+        exp_batch = exp
 
     for i in range(ITER_PER_EPOCH):
         pbar.update(1)
-        # exp_batch = replay_buffer.sample(BATCH_SIZE)
-        exp_batch = exp
+        # ---- SAMPLE BATCH FROM REPLAY BUFFER ----
+        if GEN_EXPERIENCE_BY_EPOCH:
+            exp_batch = replay_buffer.sample(BATCH_SIZE)
+
         if exp_batch.shape[0] < BATCH_SIZE:
             logger.warning(
                 f"Not enough data to sample a full batch. Expected {BATCH_SIZE}, got {exp_batch.shape[0]}"
@@ -342,7 +340,8 @@ for e in tqdm(
         PROGRESS_MESSAGE=f"{Fore.MAGENTA}Running contest for epoch {e + 1}{Style.RESET_ALL}",
     )
     logger.info(f"Contest results after epoch {e + 1}")
-    logger.info(pprint(contest_results))
+    logger.info(contest_results)
+    logger.info(pformat(contest_results))
 
     for rival_name, wr in contest_2_win_rate(contest_results).items():
         if rival_name not in win_rate:
@@ -389,7 +388,7 @@ for e in tqdm(
             SMOOTHING_WINDOW=SMOOTHING_WINDOW,
             DISPLAY_PLOT=True,
         )
-        # plot_contest_results(epochs_results)
+
         plot_loss(
             loss_data,
             FREQ_EPOCH_SAVING=FREQ_EPOCH_SAVING,

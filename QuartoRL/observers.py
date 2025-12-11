@@ -187,7 +187,7 @@ def plot_Qv_progress(
             if col == 0:
                 ax.set_ylabel("Q-value")
 
-            ax.set_ylim(-1, 1)
+            ax.set_ylim(-1.1, 1.1)
             ax.set_title(title)
             ax.grid(True, alpha=0.3)
 
@@ -260,7 +260,7 @@ def plot_Qv_progress(
             if col_idx == 0:
                 ax.set_ylabel("Q-value")
 
-            ax.set_ylim(-1, 1)
+            ax.set_ylim(-1.1, 1.1)
             ax.set_title(f"Sample {i}")
             ax.legend(fontsize=8)
             ax.grid(True, alpha=0.3)

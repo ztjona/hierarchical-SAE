@@ -65,7 +65,7 @@ def plot_win_rate(
     # Set window position if specified
     if position is not None:
         try:
-            manager = fig.canvas.manager
+            manager = fig.canvas.manager  # type: ignore
             manager.window.wm_geometry(f"+{position[0]}+{position[1]}")  # type: ignore
         except:
             pass
@@ -113,8 +113,8 @@ def plot_win_rate(
             # Add std error band with same color as line
             plt.fill_between(
                 smoothed_epochs,
-                smoothed - window_stds,
-                smoothed + window_stds,
+                smoothed - window_stds,  # type: ignore
+                smoothed + window_stds,  # type: ignore
                 alpha=0.2,
                 color=line.get_color(),
             )
@@ -183,7 +183,7 @@ def plot_loss(
     # Set window position if specified
     if position is not None:
         try:
-            manager = fig.canvas.manager
+            manager = fig.canvas.manager  # type: ignore
             manager.window.wm_geometry(f"+{position[0]}+{position[1]}")  # type: ignore
         except:
             pass

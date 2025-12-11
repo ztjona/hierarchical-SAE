@@ -3,6 +3,7 @@ configs_debug.py
 .vscode/
 partidas_guardadas/
 chat/
+logs/
 
 # images
 *.svg
