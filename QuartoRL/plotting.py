@@ -30,6 +30,7 @@ def plot_win_rate(
     DISPLAY_PLOT: bool = False,
     fig_num: int = 1,
     position: tuple[int, int] | None = (500, 600),
+    experiment_name: str = "",
 ):
     """Plot win rate over epochs for multiple rivals.
 
@@ -51,16 +52,19 @@ def plot_win_rate(
         Figure number to use for plotting (default: 1)
     position : tuple[int, int], optional
         (x, y) position in pixels for top-left corner of figure window
+    experiment_name : str
+        Experiment name to include in figure window title (default: "")
     """
     if not DISPLAY_PLOT:
         plt.ioff()  # Disable interactive mode
 
     # Retrieve existing figure or create new one
-    if plt.fignum_exists(fig_num):
-        fig = plt.figure(fig_num)
+    experiment_name = f"{experiment_name}-{fig_num}"
+    if plt.fignum_exists(experiment_name):
+        fig = plt.figure(experiment_name)
         fig.clf()  # Clear figure content but keep the window
     else:
-        fig = plt.figure(fig_num, figsize=(8, 6))
+        fig = plt.figure(experiment_name, figsize=(8, 6))
 
     # Set window position if specified
     if position is not None:
@@ -146,6 +150,7 @@ def plot_loss(
     DISPLAY_PLOT: bool = False,
     fig_num: int = 2,
     position: tuple[int, int] | None = (0, 600),
+    experiment_name: str = "",
 ):
     """
     Plot average loss per epoch with standard deviation error bands.
@@ -167,6 +172,8 @@ def plot_loss(
         Figure number to use for plotting (default: 2)
     position : tuple[int, int], optional
         (x, y) position in pixels for top-left corner of figure window
+    experiment_name : str
+        Experiment name to include in figure window title (default: "")
     """
     if not DISPLAY_PLOT:
         plt.ioff()  # Disable interactive mode
@@ -174,11 +181,12 @@ def plot_loss(
     loss_values = loss_data["loss_values"]
 
     # Retrieve existing figure or create new one
-    if plt.fignum_exists(fig_num):
-        fig = plt.figure(fig_num)
+    experiment_name = f"{experiment_name}-{fig_num}"
+    if plt.fignum_exists(experiment_name):
+        fig = plt.figure(experiment_name)
         fig.clf()  # Clear figure content but keep the window
     else:
-        fig = plt.figure(fig_num, figsize=(10, 5))
+        fig = plt.figure(experiment_name, figsize=(10, 5))
 
     # Set window position if specified
     if position is not None:
@@ -218,8 +226,8 @@ def plot_loss(
     )[0]
     plt.fill_between(
         epochs,
-        epoch_means - epoch_stds,
-        epoch_means + epoch_stds,
+        epoch_means - epoch_stds,  # type: ignore
+        epoch_means + epoch_stds,  # type: ignore
         alpha=0.3,
         color=line.get_color(),
         label="±1 std dev",

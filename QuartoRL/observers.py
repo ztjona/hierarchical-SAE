@@ -29,6 +29,7 @@ def plot_boards_comp(
     DISPLAY_PLOT: bool = True,
     MAX_BOARDS: int = 6,
     position: tuple[int, int] | None = (500, 0),
+    experiment_name: str = "",
 ) -> None:
     """Plot pairs of boards side by side in a 2xn subplot grid (transposed).
 
@@ -45,6 +46,8 @@ def plot_boards_comp(
         randomly samples MAX_BOARDS pairs (default: 6)
     position : tuple[int, int], optional
         (x, y) position in pixels for top-left corner of figure window
+    experiment_name : str
+        Experiment name to include in figure window title (default: "")
     """
     n = len(boards_pair)
     if n == 0:
@@ -58,11 +61,12 @@ def plot_boards_comp(
 
     # Create 2xn subplot grid (transposed) with adaptive sizing
     # Retrieve existing figure or create new one
-    if plt.fignum_exists(fig_num):
-        fig = plt.figure(fig_num)
+    experiment_name = f"{experiment_name}-{fig_num}"
+    if plt.fignum_exists(experiment_name):
+        fig = plt.figure(experiment_name)
         fig.clf()  # Clear figure content but keep the window
     else:
-        fig = plt.figure(fig_num, figsize=(16, 9), constrained_layout=True)
+        fig = plt.figure(experiment_name, figsize=(16, 9), constrained_layout=True)
 
     # Set window position if specified
     if position is not None:
@@ -94,7 +98,9 @@ def plot_Qv_progress(
     fig_num: int = 4,
     DISPLAY_PLOT: bool = True,
     done_v: torch.Tensor | None = None,
+    PLOT_TYPE: str = "time_series",
     position: tuple[int, int] | None = (0, 0),
+    experiment_name: str = "",
 ) -> None:
     """Plot Q-value progression over epochs for each sample in the batch.
 
@@ -114,6 +120,8 @@ def plot_Qv_progress(
         Terminal states are plotted with higher prominence (thicker, more opaque lines).
     position : tuple[int, int], optional
         (x, y) position in pixels for top-left corner of figure window
+    experiment_name : str
+        Experiment name to include in figure window title (default: "")
     """
     if not q_values_history or len(q_values_history.get("q_place", [])) == 0:
         return
@@ -131,41 +139,43 @@ def plot_Qv_progress(
     epochs = np.arange(n_epochs)
 
     # Retrieve existing figure or create new one
-    if plt.fignum_exists(fig_num):
-        fig = plt.figure(fig_num)
+    experiment_name = f"{experiment_name}-{fig_num}"
+    if plt.fignum_exists(experiment_name):
+        fig = plt.figure(experiment_name)
         fig.clf()
     else:
         fig = None  # Will be created below with appropriate size
 
-    # Handle large batch size (>15): plot 6 aggregated curves grouped by reward
-    if batch_size > 15:
-        if fig is None:
-            fig = plt.figure(fig_num, figsize=(18, 10), constrained_layout=True)
+    if fig is None:
+        fig = plt.figure(experiment_name, figsize=(16, 10), constrained_layout=True)
 
-        # Set window position if specified
-        if position is not None:
-            try:
-                manager = fig.canvas.manager  # type: ignore
-                manager.window.wm_geometry(f"+{position[0]}+{position[1]}")  # type: ignore
-            except:
-                pass
+    # Set window position if specified
+    if position is not None:
+        try:
+            manager = fig.canvas.manager  # type: ignore
+            manager.window.wm_geometry(f"+{position[0]}+{position[1]}")  # type: ignore
+        except:
+            pass
 
-        axes = fig.subplots(2, 3)
+    axes = fig.subplots(2, 3)
 
-        # Split samples by reward value
-        win_indices = [i for i in range(batch_size) if rewards[i].item() == 1.0]
-        draw_indices = [i for i in range(batch_size) if rewards[i].item() == 0.0]
-        loss_indices = [i for i in range(batch_size) if rewards[i].item() == -1.0]
+    # Split samples by reward value (round to handle decimal rewards)
+    loss_indices = [i for i in range(batch_size) if round(rewards[i].item()) == -1]
+    draw_indices = [i for i in range(batch_size) if round(rewards[i].item()) == 0]
+    win_indices = [i for i in range(batch_size) if round(rewards[i].item()) == 1]
 
-        # Define plot configurations: (row, col, indices, q_history, title)
-        plot_configs = [
-            (0, 0, win_indices, q_place_history, "Q_place - R=1"),
-            (0, 1, draw_indices, q_place_history, "Q_place - R=0"),
-            (0, 2, loss_indices, q_place_history, "Q_place - R=-1"),
-            (1, 0, win_indices, q_select_history, "Q_select - R=1"),
-            (1, 1, draw_indices, q_select_history, "Q_select - R=0"),
-            (1, 2, loss_indices, q_select_history, "Q_select - R=-1"),
-        ]
+    # Define plot configurations: (row, col, indices, q_history, title)
+    plot_configs = [
+        (0, 0, loss_indices, q_place_history, "Q_place: R=-1"),
+        (0, 1, draw_indices, q_place_history, "Q_place: R=0"),
+        (0, 2, win_indices, q_place_history, "Q_place: R=1"),
+        (1, 0, loss_indices, q_select_history, "Q_select: R=-1"),
+        (1, 1, draw_indices, q_select_history, "Q_select: R=0"),
+        (1, 2, win_indices, q_select_history, "Q_select: R=1"),
+    ]
+
+    if PLOT_TYPE == "time_series":
+        # plot 6 aggregated curves grouped by reward value
 
         for row, col, indices, q_history, title in plot_configs:
             ax = axes[row, col]  # type: ignore
@@ -191,83 +201,55 @@ def plot_Qv_progress(
             ax.set_title(title)
             ax.grid(True, alpha=0.3)
 
-    else:
-        # Small batch size (<16): create suitable grid layout
-        # Determine grid dimensions
-        if batch_size <= 3:
-            nrows, ncols = 1, batch_size
-        elif batch_size <= 6:
-            nrows, ncols = 2, 3
-        elif batch_size <= 8:
-            nrows, ncols = 2, 4
-        elif batch_size <= 12:
-            nrows, ncols = 4, 3
-        else:  # 13-15
-            nrows, ncols = 4, 4
+    elif PLOT_TYPE == "hist":
+        # Create histogram evolution plots showing Q-value distribution over epochs
+        HIST_BINS = 50
+        HIST_RANGE = (-1.1, 1.1)
 
-        if fig is None:
-            fig = plt.figure(
-                fig_num, figsize=(4 * ncols, 3 * nrows), constrained_layout=True
-            )
+        for row, col, indices, q_history, title in plot_configs:
+            ax = axes[row, col]  # type: ignore
 
-        # Set window position if specified
-        if position is not None:
-            try:
-                manager = fig.canvas.manager  # type: ignore
-                manager.window.wm_geometry(f"+{position[0]}+{position[1]}")  # type: ignore
-            except:
-                pass
+            if not indices:  # Skip if no samples in this group
+                ax.text(
+                    0.5,
+                    0.5,
+                    "No samples",
+                    ha="center",
+                    va="center",
+                    transform=ax.transAxes,
+                )
+                ax.set_title(title)
+                continue
 
-        axes = fig.subplots(nrows, ncols)
-        axes = np.atleast_2d(axes)  # type: ignore # Ensure 2D array
-        axes_flat = axes.transpose().flatten()
+            # Compute histograms for this reward group across epochs
+            hist_data = []
+            for q_epoch in q_history:
+                q_subset = q_epoch[indices].detach().cpu().numpy().flatten()
+                hist, _ = np.histogram(q_subset, bins=HIST_BINS, range=HIST_RANGE)
+                # Normalize to percentage
+                hist_percent = (hist / hist.sum()) * 100 if hist.sum() > 0 else hist
+                hist_data.append(hist_percent)
 
-        # Plot each sample (Q_place and Q_select on same axis)
-        for i in range(batch_size):
-            ax = axes_flat[i]
-
-            # Extract Q-values for this sample across epochs
-            q_place_sample = [q[i].item() for q in q_place_history]
-            q_select_sample = [q[i].item() for q in q_select_history]
-            target_reward = rewards[i].item()
-
-            # Plot both Q_place and Q_select
-            ax.plot(
-                epochs, q_place_sample, "o-", label="Q_place", color="blue", alpha=0.7
-            )
-            ax.plot(
-                epochs,
-                q_select_sample,
-                "s-",
-                label="Q_select",
-                color="green",
-                alpha=0.7,
-            )
-            ax.axhline(
-                y=target_reward,
-                color="red",
-                linestyle="--",
-                linewidth=2,
-                label=f"Target R={target_reward:.1f}",
-            )
-
-            # Only show x-label on bottom row
-            row_idx = i // ncols
-            col_idx = i % ncols
-            if row_idx == nrows - 1 or i >= batch_size - ncols:
-                ax.set_xlabel("Epoch")
-            # Only show y-label on leftmost column
-            if col_idx == 0:
-                ax.set_ylabel("Q-value")
-
-            ax.set_ylim(-1.1, 1.1)
-            ax.set_title(f"Sample {i}")
-            ax.legend(fontsize=8)
-            ax.grid(True, alpha=0.3)
-
-        # Hide unused subplots
-        for i in range(batch_size, len(axes_flat)):
-            axes_flat[i].set_visible(False)
+            # Plot histogram evolution
+            if hist_data:
+                hist_array = np.array(hist_data)
+                im = ax.imshow(
+                    hist_array.T,
+                    aspect="auto",
+                    origin="lower",
+                    cmap="viridis",
+                    interpolation="nearest",
+                    extent=[0, n_epochs, HIST_RANGE[0], HIST_RANGE[1]],
+                )
+                # Only show x-label on bottom row
+                if row == 1:
+                    ax.set_xlabel("Epoch")
+                # Only show y-label on leftmost column
+                if col == 0:
+                    ax.set_ylabel("Q-value")
+                ax.set_title(title)
+                ax.grid(True, alpha=0.3)
+                plt.colorbar(im, ax=ax, label="Percentage (%)")
 
     if DISPLAY_PLOT:
         plt.draw()

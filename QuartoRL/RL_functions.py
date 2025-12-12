@@ -276,11 +276,11 @@ def gen_experience(
                     (
                         Board.serialized_2_board(
                             b["board_state"],
-                            name=f"{b['mov_description']} | R={b['reward']}",
+                            name=f"{b['mov_description']} | R={b['reward']:.2f}",
                         ),
                         Board.serialized_2_board(
                             b["board_next_state"],
-                            name=f"{b['mov_description']} | R={b['reward']}",
+                            name=f"{b['mov_description']} | R={b['reward']:.2f}",
                         ),
                     )
                 )

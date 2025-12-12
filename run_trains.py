@@ -50,35 +50,37 @@ def modify_param_in_file(file_path, param_name, param_value):
     return modified_content
 
 
-def create_training_file(param_value, experiment_suffix):
+def create_training_file(param_value, experiment_name):
     """Create training script with modified parameter.
 
     Args:
         param_value: Value to set for the parameter
-        experiment_suffix: Suffix to add to experiment name
+        experiment_name: The name of the experiment, used for the filename.
     """
     print("=" * 80)
     print(f"Creating training file for {PARAM_ITERATE} = {param_value}")
     print("=" * 80)
 
     # Read and modify the training script
-    modified_content = modify_param_in_file(TRAIN_SCRIPT, PARAM_ITERATE, param_value)
+    modified_content = modify_param_in_file(
+        TRAIN_SCRIPT, PARAM_ITERATE, f'"{param_value}"'
+    )
 
     exp_pattern = r'^EXPERIMENT_NAME\s*=\s*"([^"]+)"'
-    exp_replacement = f'EXPERIMENT_NAME = "{EXPERIMENT_NAME}_{experiment_suffix}"'
+    exp_replacement = f'EXPERIMENT_NAME = "{experiment_name}"'
     modified_content = re.sub(
         exp_pattern, exp_replacement, modified_content, flags=re.MULTILINE
     )
 
     # Create training script file
-    output_script_name = f"trainRL_{experiment_suffix}.py"
+    output_script_name = f"train_{experiment_name}.py"
     output_path = path.join(OUTPUT_DIR, output_script_name)
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(modified_content)
 
     print(f"Created: {output_path}")
     print(f"  - {PARAM_ITERATE} = {param_value}")
-    print(f"  - EXPERIMENT_NAME = {EXPERIMENT_NAME}_{experiment_suffix}")
+    print(f"  - EXPERIMENT_NAME = {experiment_name}")
     print("=" * 80 + "\n")
 
 
@@ -92,19 +94,29 @@ def main():
     print(f"{'=' * 80}\n")
 
     created_files = []
+    run_commands = []
 
     for idx, param_value in enumerate(PARAMS, 1):
-        experiment_suffix = f"{PARAM_ITERATE}{param_value}"
+        run_id = f"{datetime.now():%m%d}-{idx:1d}"
+        exp_name = f"{PARAM_ITERATE}_{run_id}_{param_value}"
 
         print(
             f"[{idx}/{len(PARAMS)}] Creating file for {PARAM_ITERATE} = {param_value}"
         )
 
         try:
-            create_training_file(param_value, experiment_suffix)
-            created_files.append(
-                path.join(OUTPUT_DIR, f"trainRL_{experiment_suffix}.py")
-            )
+            create_training_file(param_value, exp_name)
+            script_path = path.join(OUTPUT_DIR, f"train_{exp_name}.py")
+            created_files.append(script_path)
+
+            if idx == len(PARAMS):
+                run_commands.append(
+                    f"PYTHONPATH=. python {script_path} | tee logs/{exp_name}.log &"
+                )
+            else:
+                run_commands.append(
+                    f"PYTHONPATH=. python {script_path} 1> logs/{exp_name}.log 2>&1 &"
+                )
         except Exception as e:
             print(f"Failed to create file for {param_value}: {e}")
 
@@ -118,15 +130,8 @@ def main():
     print(f"\n{'=' * 80}")
     print("TO RUN TRAINING WITH LOGGING:")
     print(f"{'=' * 80}")
-    for idx, param_value in enumerate(PARAMS, 1):
-        # Build a sortable run identifier: YYMMDDHHMMSS + experiment index (3 digits)
-        run_id = f"{datetime.now():%m%d}-{idx:1d}"
-        exp_name = f"{PARAM_ITERATE}_{run_id}_{param_value}"
-        script_path = path.join(OUTPUT_DIR, f"train_{exp_name}.py")
-        if idx == len(PARAMS):
-            print(f"python {script_path} | tee log/{exp_name}.log &")
-        else:
-            print(f"python {script_path} 1> log/{exp_name}.log &")
+    for command in run_commands:
+        print(command)
 
     print(f"{'=' * 80}\n")
 

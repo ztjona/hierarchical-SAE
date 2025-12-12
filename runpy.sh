@@ -2,6 +2,12 @@
 # Wrapper to run Python scripts with project root on PYTHONPATH
 
 ROOT_PY="development/03_validate_deserialize_boards/trainRL_view_pred.py"
+
+# Use provided script or default
+if [ -n "$1" ]; then
+    ROOT_PY="$1"
+fi
+
 # Create logs directory if it doesn't exist
 mkdir -p logs
 
@@ -9,7 +15,6 @@ mkdir -p logs
 TIMESTAMP=$(date +%y-%m-%d_%H_%M)
 
 BASENAME=$(basename "$ROOT_PY" .py)
-# BASENAME=$(basename "$1" .py)
 LOGFILE="logs/${BASENAME}-${TIMESTAMP}.log"
 
 # Run with unbuffered output, save to file and display on screen
