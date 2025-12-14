@@ -33,10 +33,11 @@ logger.info("Imports done.")
 
 # STARTING_NET = "CHECKPOINTS//REF//20251023_1649-_E02_win_rate_epoch_0022.pt"
 STARTING_NET = None  # Set to None to start with random weights
-EXPERIMENT_NAME = "04_LOSS_select"
+EXPERIMENT_NAME = "04_LOSS"
 CHECKPOINT_FOLDER = f"./CHECKPOINTS/{EXPERIMENT_NAME}/"
 # ARCHITECTURE = QuartoCNN
 ARCHITECTURE = QuartoCNN_uncoupled
+LOSS_APPROACH = "combined_avg"  # Options: "combined_avg", "only_select", "only_place"
 REWARD_FUNCTION = "propagate"  # "final", "propagate", "discount"
 
 # if True, experience is generated at the beginning of each epoch
@@ -76,14 +77,14 @@ BATCH_SIZE = 30
 mode_2x2 = True
 
 # every epoch experience is generated with a new bot instance, models are saved at the end of each epoch
-EPOCHS = 500
+EPOCHS = 1000
 
 # number of last states to consider in the experience generation at the beginning of training
-N_LAST_STATES_INIT: int = 3
+N_LAST_STATES_INIT: int = 2
 # number of last states to consider in the experience generation at the end of training. -1 means all states
-N_LAST_STATES_FINAL = 3  # 16 is all states in 4x4 board
+N_LAST_STATES_FINAL = 2  # 16 is all states in 4x4 board
 
-MATCHES_PER_EPOCH = 3000  # number self-play matches per epoch
+MATCHES_PER_EPOCH = 5000  # number self-play matches per epoch
 # movs per match * #_matches per epoch (max 16, but avg less)
 STEPS_PER_EPOCH = N_LAST_STATES_FINAL * MATCHES_PER_EPOCH
 # number of times the network is updated per epoch
@@ -106,12 +107,12 @@ TEMPERATURE_EXPLORE = 2  # view test of temperature
 # temperature for exploitation, lower values lead to more exploitation
 TEMPERATURE_EXPLOIT = 0.1
 
-FREQ_EPOCH_SAVING = 100  # save model, figures every n epochs
+FREQ_EPOCH_SAVING = 1000  # save model, figures every n epochs
 
 
 # Plots are shown every epoch until this number of epochs. After that, only every
 # FREQ_EPOCH_PLOT_SHOW epochs. At the end, all plots are shown again.
-FREQ_EPOCH_PLOT_SHOW = 10
+FREQ_EPOCH_PLOT_SHOW = 300
 
 # in iters if >= N_ITERS show epoch lines in loss plot
 SMOOTHING_WINDOW = 10
@@ -136,6 +137,9 @@ logger.info(f"Exp. gen.:\t{MATCHES_PER_EPOCH=}, {STEPS_PER_EPOCH=}, {REPLAY_SIZE
 logger.info(f"Network updates:\t{ITER_PER_EPOCH=}, {N_BATCHS_2_UPDATE_TARGET=}")
 logger.info(f"Exploration:\t{TEMPERATURE_EXPLORE=}, {TEMPERATURE_EXPLOIT=}")
 logger.info(f"N_LAST_STATES:\tINIT={N_LAST_STATES_INIT}, FINAL={N_LAST_STATES_FINAL}")
+logger.info(f"LOSS_APPROACH={LOSS_APPROACH}")
+logger.info(f"REWARD_FUNCTION={REWARD_FUNCTION}")
+
 # ###########################
 # Unpack baselines into rivals for evaluation
 # limit the number of rivals for evaluation, -1 means no limit
@@ -283,6 +287,7 @@ for e in tqdm(
             target_net=target_net,
             exp_batch=exp_batch,
             GAMMA=GAMMA,
+            LOSS_APPROACH=LOSS_APPROACH,
         )
         loss = loss_fcn(state_action_values, expected_state_action_values)
         loss_data["loss_values"].append(loss.item())

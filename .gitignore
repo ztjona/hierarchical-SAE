@@ -2,6 +2,7 @@
 partidas_guardadas/
 chat/
 logs/
+train_scripts/
 
 *pkl
 # images

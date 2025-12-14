@@ -17,9 +17,9 @@ from os import path
 from datetime import datetime
 
 
-EXPERIMENT_NAME = "REWARD"
-PARAM_ITERATE = "REWARD_FUNCTION"
-PARAMS = ["final", "propagate", "discount"]
+EXPERIMENT_NAME = "04b_LOSS"
+PARAM_ITERATE = "LOSS_APPROACH"
+PARAMS = ["combined_avg", "only_select", "only_place"]
 
 # Path to the original training script
 TRAIN_SCRIPT = "development/03_validate_deserialize_boards/trainRL_view_pred.py"

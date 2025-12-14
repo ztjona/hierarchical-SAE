@@ -332,6 +332,7 @@ def DQN_training_step(
     target_net: NN_abstract,
     GAMMA: float,
     exp_batch: TensorDict,
+    LOSS_APPROACH: str = "combined_avg",
 ):
     """Perform one DQN training step using the given batch of experiences.
 
@@ -345,7 +346,8 @@ def DQN_training_step(
         Discount factor for future rewards
     exp_batch : TensorDict
         Batch of experiences with state, action, reward, next_state, done
-
+    LOSS_APPROACH : str
+        Approach for computing state-action values. Options are "combined_avg", "only_select", "only_place".
     Returns
     -------
     state_action_values : torch.Tensor
@@ -417,9 +419,38 @@ def DQN_training_step(
     # - First moves (place=-1): placement gets Q=0, so only selection matters
     # - Terminal states (select=-1): selection gets Q=0, so only placement matters
     #
-    # Use AVERAGE to represent the joint action value
-    # This is mathematically sound: the expected return depends on BOTH actions
-    state_action_values = (state_place_action_values + state_sel_action_values) / 2
+    if LOSS_APPROACH == "combined_avg":
+        # Use AVERAGE to represent the joint action value
+        # the expected return depends on BOTH actions
+        # Takes the (place + select) / 2 when both are valid
+        # For first moves only selection matters
+        # For terminal states only placement matters
+        # _factor divides by 2 when both actions are valid, otherwise by 1
+        # Scale by the number of valid action components in this step:
+        # - placement is valid when not first_move
+        # - selection is valid when not final_move (non-terminal)
+        place_valid = (~first_move_mask).type_as(state_place_action_values)
+        select_valid = (non_terminal_mask).type_as(state_place_action_values)
+        # 1 if one is valid, 2 if both are valid
+        valid_count = place_valid + select_valid
+
+        _factor = 1.0 / valid_count
+
+        state_action_values = (
+            state_place_action_values + state_sel_action_values
+        ) * _factor
+        # state_action_values_2 = (
+        #     state_place_action_values + state_sel_action_values
+        # ) * 0.5
+
+    elif LOSS_APPROACH == "only_select":
+        # Use ONLY the selection action value for training
+        # This simplifies the learning task, as placement actions
+        state_action_values = state_sel_action_values
+    elif LOSS_APPROACH == "only_place":
+        state_action_values = state_place_action_values
+    else:
+        raise ValueError(f"Unknown LOSS_APPROACH {LOSS_APPROACH}")
 
     # Compute V(s_{t+1}) for all next states using target network
     # Initialize with zeros (terminal states have V=0 by definition)
@@ -431,8 +462,14 @@ def DQN_training_step(
             exp_batch["next_state_board"][non_terminal_mask],
             exp_batch["next_state_piece"][non_terminal_mask],
         )
-        # Combine using average (joint action value)
-        _next_val = (_next_state_pos + _next_state_piece) / 2
+        if LOSS_APPROACH == "combined_avg":
+            # Combine using average (joint action value)
+            _next_val = (_next_state_pos + _next_state_piece) / 2
+        elif LOSS_APPROACH == "only_select":
+            _next_val = _next_state_piece
+        elif LOSS_APPROACH == "only_place":
+            _next_val = _next_state_pos
+
         # Take maximum Q-value across all possible actions
         next_state_values[non_terminal_mask] = _next_val.max(dim=1).values
 
