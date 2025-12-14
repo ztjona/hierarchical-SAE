@@ -1,4 +1,4 @@
-# Hierarchical-SAE: Quarto Bot Competition Framework
+# Quarto Bot Training Framework
 
 ## Overview
 This project provides a comprehensive framework for training and evaluating AI bots that play the board game Quarto using Deep Q-Learning (DQN). The system supports multiple neural network architectures, loss calculation approaches, and reward functions to develop intelligent game-playing agents through reinforcement learning.
@@ -21,7 +21,7 @@ This project provides a comprehensive framework for training and evaluating AI b
 
 ## Requirements
 - Python 3.x
-- quartopy (Quarto game engine)
+- [quartopy](https://github.com/ztjona/Quartopy) (Quarto game engine) - v1.3.2 or later
 - PyTorch (for CNN models)
 - TorchRL (for replay buffers and RL utilities)
 - tqdm (progress bars)
