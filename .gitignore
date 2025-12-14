@@ -1,8 +1,7 @@
 .vscode/
 partidas_guardadas/
-chat/
-logs/
-train_scripts/
+logs/**.log
+train_scripts/**.py
 
 *pkl
 # images
