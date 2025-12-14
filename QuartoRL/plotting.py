@@ -137,7 +137,7 @@ def plot_win_rate(
     if len(win_rates) % FREQ_EPOCH_SAVING == 0 and FREQ_EPOCH_SAVING != -1:
         plt.savefig(
             path.join(FOLDER_SAVE, FIG_NAME(len(win_rates))),
-            dpi=300,
+            dpi=1000,
             bbox_inches="tight",
         )
 
@@ -247,7 +247,7 @@ def plot_loss(
     if n_epochs % FREQ_EPOCH_SAVING == 0 and FREQ_EPOCH_SAVING != -1:
         plt.savefig(
             path.join(FOLDER_SAVE, FIG_NAME(n_epochs)),
-            dpi=300,
+            dpi=1000,
             bbox_inches="tight",
         )
 

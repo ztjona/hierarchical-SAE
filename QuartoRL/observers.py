@@ -19,6 +19,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import random
+from datetime import datetime
+from os import path
 
 
 def plot_boards_comp(
@@ -30,6 +32,10 @@ def plot_boards_comp(
     MAX_BOARDS: int = 6,
     position: tuple[int, int] | None = (500, 0),
     experiment_name: str = "",
+    FREQ_EPOCH_SAVING: int = -1,
+    FOLDER_SAVE: str = "./",
+    FIG_NAME=lambda epoch: f"{datetime.now().strftime('%Y%m%d_%H%M')}-boards_comp_{epoch:04d}.svg",
+    current_epoch: int = 0,
 ) -> None:
     """Plot pairs of boards side by side in a 2xn subplot grid (transposed).
 
@@ -48,6 +54,14 @@ def plot_boards_comp(
         (x, y) position in pixels for top-left corner of figure window
     experiment_name : str
         Experiment name to include in figure window title (default: "")
+    FREQ_EPOCH_SAVING : int
+        If -1, no saving. Otherwise, save figure every n epochs (default: -1)
+    FOLDER_SAVE : str
+        Directory path to save figures (default: "./")
+    FIG_NAME : callable
+        Lambda function that generates filename given epoch number
+    current_epoch : int
+        Current epoch number for saving (default: 0)
     """
     n = len(boards_pair)
     if n == 0:
@@ -87,6 +101,14 @@ def plot_boards_comp(
         b1.plot(title=b1.name, ax=axes[0, i], show=False)  # type: ignore
         b2.plot(title=b2.name, ax=axes[1, i], show=False)  # type: ignore
 
+    # Save the figure at regular intervals
+    if current_epoch % FREQ_EPOCH_SAVING == 0 and FREQ_EPOCH_SAVING != -1:
+        plt.savefig(
+            path.join(FOLDER_SAVE, FIG_NAME(current_epoch)),
+            dpi=1000,
+            bbox_inches="tight",
+        )
+
     if DISPLAY_PLOT:
         plt.draw()
         plt.pause(0.001)
@@ -101,6 +123,10 @@ def plot_Qv_progress(
     PLOT_TYPE: str = "time_series",
     position: tuple[int, int] | None = (0, 0),
     experiment_name: str = "",
+    FREQ_EPOCH_SAVING: int = -1,
+    FOLDER_SAVE: str = "./",
+    FIG_NAME=lambda epoch: f"{datetime.now().strftime('%Y%m%d_%H%M')}-qv_progress_{epoch:04d}.svg",
+    current_epoch: int = 0,
 ) -> None:
     """Plot Q-value progression over epochs for each sample in the batch.
 
@@ -122,6 +148,14 @@ def plot_Qv_progress(
         (x, y) position in pixels for top-left corner of figure window
     experiment_name : str
         Experiment name to include in figure window title (default: "")
+    FREQ_EPOCH_SAVING : int
+        If -1, no saving. Otherwise, save figure every n epochs (default: -1)
+    FOLDER_SAVE : str
+        Directory path to save figures (default: "./")
+    FIG_NAME : callable
+        Lambda function that generates filename given epoch number
+    current_epoch : int
+        Current epoch number for saving (default: 0)
     """
     if not q_values_history or len(q_values_history.get("q_place", [])) == 0:
         return
@@ -250,6 +284,14 @@ def plot_Qv_progress(
                 ax.set_title(title)
                 ax.grid(True, alpha=0.3)
                 plt.colorbar(im, ax=ax, label="Percentage (%)")
+
+    # Save the figure at regular intervals
+    if current_epoch % FREQ_EPOCH_SAVING == 0 and FREQ_EPOCH_SAVING != -1:
+        plt.savefig(
+            path.join(FOLDER_SAVE, FIG_NAME(current_epoch)),
+            dpi=1000,
+            bbox_inches="tight",
+        )
 
     if DISPLAY_PLOT:
         plt.draw()

@@ -26,6 +26,7 @@ from pprint import pformat
 import pickle
 from colorama import init, Fore, Style
 import socket
+from os import path
 import matplotlib.pyplot as plt
 
 # ---- PARAMS ----
@@ -33,7 +34,7 @@ logger.info("Imports done.")
 
 # STARTING_NET = "CHECKPOINTS//REF//20251023_1649-_E02_win_rate_epoch_0022.pt"
 STARTING_NET = None  # Set to None to start with random weights
-EXPERIMENT_NAME = "04_LOSS"
+EXPERIMENT_NAME = "05_LOSS"
 CHECKPOINT_FOLDER = f"./CHECKPOINTS/{EXPERIMENT_NAME}/"
 # ARCHITECTURE = QuartoCNN
 ARCHITECTURE = QuartoCNN_uncoupled
@@ -42,8 +43,8 @@ REWARD_FUNCTION = "propagate"  # "final", "propagate", "discount"
 
 # if True, experience is generated at the beginning of each epoch
 # if False, experience is generated only at the first epoch and reused for the rest of epochs
-# GEN_EXPERIENCE_BY_EPOCH = True
-GEN_EXPERIENCE_BY_EPOCH = False
+GEN_EXPERIENCE_BY_EPOCH = True
+# GEN_EXPERIENCE_BY_EPOCH = False
 
 # The bot at the end of each epoch will be evaluated against a limited number of rivals known as BASELINES.
 BASELINES = [
@@ -77,14 +78,14 @@ BATCH_SIZE = 30
 mode_2x2 = True
 
 # every epoch experience is generated with a new bot instance, models are saved at the end of each epoch
-EPOCHS = 1000
+EPOCHS = 3000
 
 # number of last states to consider in the experience generation at the beginning of training
 N_LAST_STATES_INIT: int = 2
 # number of last states to consider in the experience generation at the end of training. -1 means all states
 N_LAST_STATES_FINAL = 2  # 16 is all states in 4x4 board
 
-MATCHES_PER_EPOCH = 5000  # number self-play matches per epoch
+MATCHES_PER_EPOCH = 100  # number self-play matches per epoch
 # movs per match * #_matches per epoch (max 16, but avg less)
 STEPS_PER_EPOCH = N_LAST_STATES_FINAL * MATCHES_PER_EPOCH
 # number of times the network is updated per epoch
@@ -92,7 +93,7 @@ ITER_PER_EPOCH = STEPS_PER_EPOCH // BATCH_SIZE
 
 if GEN_EXPERIENCE_BY_EPOCH:
     # EPOCHs x STEPS_PER_EPOCH, DATA from the last _#_ epochs
-    REPLAY_SIZE = 50 * STEPS_PER_EPOCH
+    REPLAY_SIZE = 100 * STEPS_PER_EPOCH
 else:
     # only STEPS_PER_EPOCH, DATA from the first epoch
     REPLAY_SIZE = STEPS_PER_EPOCH
@@ -112,7 +113,7 @@ FREQ_EPOCH_SAVING = 1000  # save model, figures every n epochs
 
 # Plots are shown every epoch until this number of epochs. After that, only every
 # FREQ_EPOCH_PLOT_SHOW epochs. At the end, all plots are shown again.
-FREQ_EPOCH_PLOT_SHOW = 300
+FREQ_EPOCH_PLOT_SHOW = 50
 
 # in iters if >= N_ITERS show epoch lines in loss plot
 SMOOTHING_WINDOW = 10
@@ -373,8 +374,10 @@ for e in tqdm(
     # ------ Store results
     epochs_results.append(dict(contest_results))
 
-    if (e + 1) % FREQ_EPOCH_SAVING == 0:
-        with open(f"{EXPERIMENT_NAME}.pkl", "wb") as f:
+    if (e + 1) % FREQ_EPOCH_SAVING == 0 or (e + 1) == EPOCHS:
+        logger.info("Saving results to disk...")
+        pkl_path = path.join(CHECKPOINT_FOLDER, f"{EXPERIMENT_NAME}.pkl")
+        with open(pkl_path, "wb") as f:
             pickle.dump(
                 {
                     "epochs_results": epochs_results,
@@ -393,6 +396,9 @@ for e in tqdm(
             q_place=q_place,
             q_select=q_select,
             experiment_name=EXPERIMENT_NAME,
+            FREQ_EPOCH_SAVING=FREQ_EPOCH_SAVING,
+            FOLDER_SAVE=CHECKPOINT_FOLDER,
+            current_epoch=e + 1,
         )
 
         plot_Qv_progress(
@@ -403,6 +409,9 @@ for e in tqdm(
             done_v=exp["done"],
             PLOT_TYPE=Q_PLOT_TYPE,
             experiment_name=EXPERIMENT_NAME,
+            FREQ_EPOCH_SAVING=FREQ_EPOCH_SAVING,
+            FOLDER_SAVE=CHECKPOINT_FOLDER,
+            current_epoch=e + 1,
         )
 
         plot_win_rate(
