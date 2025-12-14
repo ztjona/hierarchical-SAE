@@ -50,13 +50,13 @@ GEN_EXPERIENCE_BY_EPOCH = True
 BASELINES = [
     {
         # "path": "CHECKPOINTS//EXP_id03//20250922_1247-EXP_id03_epoch_0009.pt",
-        "path": "CHECKPOINTS//REF//20251023_1649-_E02_win_rate_epoch_0022.pt",
-        "name": "bot_good_WR_B",
+        "path": "CHECKPOINTS\\LOSS_APPROACHs_1212-2_only_select\\20251212_2206-LOSS_APPROACHs_1212-2_only_select_E_1034.pt",
+        "name": "bot_loss-BT",
         "bot": Quarto_bot,
         "params": {
             "deterministic": False,
             "temperature": 0.1,
-            "model_class": QuartoCNN,
+            "model_class": QuartoCNN_uncoupled,
         },
     },
     {

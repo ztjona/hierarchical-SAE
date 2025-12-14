@@ -110,13 +110,9 @@ def main():
             created_files.append(script_path)
 
             if idx == len(PARAMS):
-                run_commands.append(
-                    f"PYTHONPATH=. python {script_path} | tee logs/{exp_name}.log &"
-                )
+                run_commands.append(f"./runpy.sh {script_path}")
             else:
-                run_commands.append(
-                    f"PYTHONPATH=. python {script_path} 1> logs/{exp_name}.log 2>&1 &"
-                )
+                run_commands.append(f"./runpy.sh {script_path} &")
         except Exception as e:
             print(f"Failed to create file for {param_value}: {e}")
 

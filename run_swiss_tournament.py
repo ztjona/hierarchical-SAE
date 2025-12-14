@@ -38,6 +38,7 @@ Date: 28 / 10 / 2025
 import logging
 from sys import stdout
 from datetime import datetime
+from models.CNN_uncoupled import QuartoCNN as QuartoCNN_uncoupled
 
 logging.basicConfig(
     level=logging.INFO,
@@ -164,8 +165,16 @@ def run_swiss_tournament(
             bot2_info = bots_info[idx2]
 
             # Create bot instances
-            bot1 = Quarto_bot(model_path=bot1_info["path"], **bot_params)
-            bot2 = Quarto_bot(model_path=bot2_info["path"], **bot_params)
+            bot1 = Quarto_bot(
+                model_path=bot1_info["path"],
+                model_class=QuartoCNN_uncoupled,
+                **bot_params,
+            )
+            bot2 = Quarto_bot(
+                model_path=bot2_info["path"],
+                model_class=QuartoCNN_uncoupled,
+                **bot_params,
+            )
 
             # Play first game
             _, win_rate1 = play_games(
