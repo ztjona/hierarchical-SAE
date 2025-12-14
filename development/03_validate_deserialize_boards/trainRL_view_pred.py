@@ -46,32 +46,7 @@ REWARD_FUNCTION = "propagate"  # "final", "propagate", "discount"
 GEN_EXPERIENCE_BY_EPOCH = True
 # GEN_EXPERIENCE_BY_EPOCH = False
 
-# The bot at the end of each epoch will be evaluated against a limited number of rivals known as BASELINES.
-BASELINES = [
-    {
-        # "path": "CHECKPOINTS//EXP_id03//20250922_1247-EXP_id03_epoch_0009.pt",
-        "path": "CHECKPOINTS\\LOSS_APPROACHs_1212-2_only_select\\20251212_2206-LOSS_APPROACHs_1212-2_only_select_E_1034.pt",
-        "name": "bot_loss-BT",
-        "bot": Quarto_bot,
-        "params": {
-            "deterministic": False,
-            "temperature": 0.1,
-            "model_class": QuartoCNN_uncoupled,
-        },
-    },
-    {
-        "path": "CHECKPOINTS//EXP_id03//20250922_1247-EXP_id03_epoch_0000.pt",
-        "name": "bot_random",
-        "bot": Quarto_bot,
-        "params": {
-            "deterministic": False,
-            "temperature": 0.1,
-            "model_class": QuartoCNN,
-        },
-    },
-]
 N_MATCHES_EVAL = 30  # number of matches to evaluate the bot at the end of each epoch for the selected BASELINES
-
 
 BATCH_SIZE = 30
 # When True, checks for winning in 2x2 squares. False, only in rows, columns and diagonals.
@@ -129,6 +104,32 @@ TAU = 0.01  # recommended value by CHATGPT
 # TAU = 0.005
 GAMMA = 0.99
 
+# ###########################
+# The bot at the end of each epoch will be evaluated against a limited number of rivals known as BASELINES.
+BASELINES = [
+    {
+        "path": "CHECKPOINTS\\LOSS_APPROACHs_1212-2_only_select\\20251212_2206-LOSS_APPROACHs_1212-2_only_select_E_1034.pt",
+        "name": "bot_loss-BT",
+        "bot": Quarto_bot,
+        "params": {
+            "deterministic": False,
+            "temperature": 0.1,
+            "model_class": QuartoCNN_uncoupled,
+        },
+    },
+    {
+        "path": "CHECKPOINTS//EXP_id03//20250922_1247-EXP_id03_epoch_0000.pt",
+        "name": "bot_random",
+        "bot": Quarto_bot,
+        "params": {
+            "deterministic": False,
+            "temperature": 0.1,
+            "model_class": QuartoCNN,
+        },
+    },
+]
+
+# ###########################
 logger.info(f"PC name: {socket.gethostname()}")
 logger.info(f"Experiment name:\t{EXPERIMENT_NAME}")
 logger.info(
