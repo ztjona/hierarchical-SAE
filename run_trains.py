@@ -17,12 +17,12 @@ from os import path
 from datetime import datetime
 
 
-EXPERIMENT_NAME = "04b_LOSS"
-PARAM_ITERATE = "LOSS_APPROACH"
-PARAMS = ["combined_avg", "only_select", "only_place"]
+EXPERIMENT_NAME = "B01_States"
+PARAM_ITERATE = "N_LAST_STATES_FINAL"
+PARAMS = [2, 4, 7, 10, 13, 16]
 
 # Path to the original training script
-TRAIN_SCRIPT = "development/03_validate_deserialize_boards/trainRL_view_pred.py"
+TRAIN_SCRIPT = "trainRL.py"
 OUTPUT_DIR = "train_scripts/"
 
 
@@ -62,9 +62,7 @@ def create_training_file(param_value, experiment_name):
     print("=" * 80)
 
     # Read and modify the training script
-    modified_content = modify_param_in_file(
-        TRAIN_SCRIPT, PARAM_ITERATE, f'"{param_value}"'
-    )
+    modified_content = modify_param_in_file(TRAIN_SCRIPT, PARAM_ITERATE, param_value)
 
     exp_pattern = r'^EXPERIMENT_NAME\s*=\s*"([^"]+)"'
     exp_replacement = f'EXPERIMENT_NAME = "{experiment_name}"'

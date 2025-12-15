@@ -1,11 +1,26 @@
 #!/bin/bash
 # Wrapper to run Python scripts with project root on PYTHONPATH
 
-ROOT_PY="development/03_validate_deserialize_boards/trainRL_view_pred.py"
+ROOT_PY="trainRL.py"
+ECHO_OUTPUT=true
 
-# Use provided script or default
-if [ -n "$1" ]; then
-    ROOT_PY="$1"
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --no_echo)
+            ECHO_OUTPUT=false
+            shift
+            ;;
+        *)
+            ROOT_PY="$1"
+            shift
+            ;;
+    esac
+done
+
+# Use default if no script provided
+if [ -z "$ROOT_PY" ]; then
+    ROOT_PY="trainRL.py"
 fi
 
 # Create logs directory if it doesn't exist
@@ -17,8 +32,14 @@ TIMESTAMP=$(date +%y-%m-%d_%H_%M)
 BASENAME=$(basename "$ROOT_PY" .py)
 LOGFILE="logs/${BASENAME}-${TIMESTAMP}.log"
 
-# Run with unbuffered output, save to file and display on screen
-PYTHONPATH=. python -u "$ROOT_PY" | tee "$LOGFILE"
+# Run with unbuffered output
+if [ "$ECHO_OUTPUT" = true ]; then
+    # Display on screen and save to file
+    PYTHONPATH=. python -u "$ROOT_PY" | tee "$LOGFILE"
+else
+    # Only save to file, no terminal output
+    PYTHONPATH=. python "$ROOT_PY" > "$LOGFILE" 2>&1
+fi
 
 # Remove ANSI color codes from the log file after execution
 sed -i 's/\x1b\[[0-9;]*m//g' "$LOGFILE"
