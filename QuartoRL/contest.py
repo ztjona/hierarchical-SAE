@@ -98,16 +98,15 @@ def run_contest(
 
     if not rival_names:
         rival_names = [path.basename(r) for r in rivals]
-    rivals_selected = {rival_names[i]: rivals[i] for i in selected}
+    rivals_selected = {rival_names[i]: (rivals[i], i) for i in selected}
 
     # index del rival: {"wins": 0, "losses": 0, "draws": 0}
     results: dict[int | str, dict[str, int]] = defaultdict(
         lambda: {"wins": 0, "losses": 0, "draws": 0}
     )
-    for idx, (rival_name, rival_file) in enumerate(
+    for idx, (rival_name, (rival_file, rival_idx)) in enumerate(
         tqdm(rivals_selected.items(), desc=PROGRESS_MESSAGE)
     ):
-        rival_idx = list(rivals_selected.keys()).index(rival_name)
         rival = rival_class_list[rival_idx](
             model_path=rival_file, **rival_options_list[rival_idx]
         )

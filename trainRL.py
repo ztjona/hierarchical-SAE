@@ -148,9 +148,8 @@ logger.info(f"REWARD_FUNCTION={REWARD_FUNCTION}")
 RIVALS_IN_TOURNAMENT = -1
 RIVALS_NAMEs = [b["name"] for b in BASELINES]
 RIVALS_PATHs = [b["path"] for b in BASELINES]
-RIVALS_CLASS = BASELINES[0]["bot"]  # assumes all baselines have the same class TODO
-# assumes all baselines have the same params TODO
-RIVALS_PARAMs = BASELINES[0]["params"]
+RIVALS_CLASS = [b["bot"] for b in BASELINES]
+RIVALS_PARAMs = [b["params"] for b in BASELINES]
 
 win_rate: dict[str | int, list[float]] = {}  # list of win rates of epochs by rival
 q_values_history: dict[str, list] = {
