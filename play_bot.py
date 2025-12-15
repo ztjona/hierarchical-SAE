@@ -21,10 +21,20 @@ f = "CHECKPOINTS//EXP_id03//20250922_1247-EXP_id03_epoch_0009.pt"
 # medio malo
 # f = "CHECKPOINTS//EXP_id03//20250922_1920-EXP_id03_epoch_0377.pt"
 
-bot = Quarto_bot(model_path=f)
+
+from models.CNN_uncoupled import QuartoCNN as QuartoCNN_uncoupled
+
+_f_loss_BT = "CHECKPOINTS\\LOSS_APPROACHs_1212-2_only_select\\20251212_2206-LOSS_APPROACHs_1212-2_only_select_E_1034.pt"
+
+bot_loss_BT = Quarto_bot(
+    model_path=_f_loss_BT,
+    model_class=QuartoCNN_uncoupled,
+    deterministic=False,
+    temperature=0.1,
+)
 _, win_rate_p1 = play_games(
     matches=1,
-    player1=bot,
+    player1=bot_loss_BT,
     player2=human,
     verbose=True,
     save_match=True,
