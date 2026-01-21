@@ -17,9 +17,9 @@ from os import path
 from datetime import datetime
 
 
-EXPERIMENT_NAME = "B01_States"
-PARAM_ITERATE = "N_LAST_STATES_FINAL"
-PARAMS = [2, 4, 7, 10, 13, 16]
+EXPERIMENT_NAME = "B02replicate"
+PARAM_ITERATE = "LR"
+PARAMS = [1e-6, 5e-6, 1e-5, 1e-4, 5e-4, 1e-3]
 
 # Path to the original training script
 TRAIN_SCRIPT = "trainRL.py"
@@ -96,21 +96,21 @@ def main():
 
     for idx, param_value in enumerate(PARAMS, 1):
         run_id = f"{datetime.now():%m%d}-{idx:1d}"
-        exp_name = f"{PARAM_ITERATE}_{run_id}_{param_value}"
+        exp_variant_name = f"{EXPERIMENT_NAME}-{PARAM_ITERATE}_{run_id}_{param_value}"
 
         print(
             f"[{idx}/{len(PARAMS)}] Creating file for {PARAM_ITERATE} = {param_value}"
         )
 
         try:
-            create_training_file(param_value, exp_name)
-            script_path = path.join(OUTPUT_DIR, f"train_{exp_name}.py")
+            create_training_file(param_value, exp_variant_name)
+            script_path = path.join(OUTPUT_DIR, f"{exp_variant_name}.py")
             created_files.append(script_path)
 
             if idx == len(PARAMS):
                 run_commands.append(f"./runpy.sh {script_path}")
             else:
-                run_commands.append(f"./runpy.sh {script_path} &")
+                run_commands.append(f"./runpy.sh --no_echo {script_path} &")
         except Exception as e:
             print(f"Failed to create file for {param_value}: {e}")
 

@@ -100,7 +100,7 @@ Q_PLOT_TYPE = "hist"  # Options: "time_series" or "hist"
 # ###########################
 MAX_GRAD_NORM = 1.0
 LR = 5e-5  # initial
-LR_F = 5e-5
+LR_F = LR  # not change in LR
 TAU = 0.01  # recommended value by CHATGPT
 # TAU = 0.005
 GAMMA = 0.99
