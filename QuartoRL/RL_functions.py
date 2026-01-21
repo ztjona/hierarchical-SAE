@@ -256,17 +256,18 @@ def gen_experience(
     if COLLECT_BOARDS:
         boards: list[tuple[Board, Board]] = []
 
+    c_matches_shorter = 0
+    exp_sizes = []
     for match_data in matches_data:
         exp = convert_2_state_action_reward(
             match_data, REWARD_FUNCTION_TYPE=REWARD_FUNCTION_TYPE
         )
 
-        if n_last_states < exp.shape[0]:
+        if n_last_states <= exp.shape[0]:
             exp = exp.iloc[-n_last_states:]
-        elif n_last_states >= exp.shape[0]:
-            logger.warning(
-                f"n_last_states ({n_last_states}) is greater than the number of states in the match ({exp.shape[0]}). Using all states."
-            )
+        elif n_last_states > exp.shape[0]:
+            exp_sizes.append(exp.shape[0])
+            c_matches_shorter += 1
         exp_all.append(exp)
 
         if COLLECT_BOARDS:
@@ -285,6 +286,10 @@ def gen_experience(
                     )
                 )
 
+    if c_matches_shorter > 0:
+        logger.warning(
+            f"n_last_states ({n_last_states}) is greater than the number of states in the match (avg:{np.mean(exp_sizes)}) ({c_matches_shorter} times). Using all states."
+        )
     p_all = pd.concat(exp_all, ignore_index=True)  # just for easy concat
 
     logger.debug(f"Total states collected: {p_all.shape[0]}")

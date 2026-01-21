@@ -34,7 +34,7 @@ logger.info("Imports done.")
 
 # STARTING_NET = "CHECKPOINTS//REF//20251023_1649-_E02_win_rate_epoch_0022.pt"
 STARTING_NET = None  # Set to None to start with random weights
-EXPERIMENT_NAME = "05_LOSS"
+EXPERIMENT_NAME = "B02_verify"
 CHECKPOINT_FOLDER = f"./CHECKPOINTS/{EXPERIMENT_NAME}/"
 # ARCHITECTURE = QuartoCNN
 ARCHITECTURE = QuartoCNN_uncoupled
@@ -48,33 +48,34 @@ GEN_EXPERIENCE_BY_EPOCH = True
 
 N_MATCHES_EVAL = 30  # number of matches to evaluate the bot at the end of each epoch for the selected BASELINES
 
-BATCH_SIZE = 30
+BATCH_SIZE = 32
 # When True, checks for winning in 2x2 squares. False, only in rows, columns and diagonals.
 mode_2x2 = True
 
 # every epoch experience is generated with a new bot instance, models are saved at the end of each epoch
-EPOCHS = 3000
+EPOCHS = 10_000
 
 # number of last states to consider in the experience generation at the beginning of training
 N_LAST_STATES_INIT: int = 2
 # number of last states to consider in the experience generation at the end of training. -1 means all states
 N_LAST_STATES_FINAL = 2  # 16 is all states in 4x4 board
 
-MATCHES_PER_EPOCH = 100  # number self-play matches per epoch
+MATCHES_PER_EPOCH = 32  # number self-play matches per epoch
 # movs per match * #_matches per epoch (max 16, but avg less)
 STEPS_PER_EPOCH = N_LAST_STATES_FINAL * MATCHES_PER_EPOCH
 # number of times the network is updated per epoch
 ITER_PER_EPOCH = STEPS_PER_EPOCH // BATCH_SIZE
 
 if GEN_EXPERIENCE_BY_EPOCH:
-    # EPOCHs x STEPS_PER_EPOCH, DATA from the last _#_ epochs
-    REPLAY_SIZE = 100 * STEPS_PER_EPOCH
+    # EPOCHs x STEPS_PER_EPOCH
+    # N epochs (DATA from the last)
+    REPLAY_SIZE = 128 * STEPS_PER_EPOCH
 else:
     # only STEPS_PER_EPOCH, DATA from the first epoch
     REPLAY_SIZE = STEPS_PER_EPOCH
 
 # update target network every n batches processed, ~x3/epoch
-N_BATCHS_2_UPDATE_TARGET = ITER_PER_EPOCH // 3
+N_BATCHS_2_UPDATE_TARGET = max(ITER_PER_EPOCH // 3, ITER_PER_EPOCH)  # to avoid mod 0.
 
 
 # temperature for exploration, higher values lead to more exploration
@@ -83,12 +84,12 @@ TEMPERATURE_EXPLORE = 2  # view test of temperature
 # temperature for exploitation, lower values lead to more exploitation
 TEMPERATURE_EXPLOIT = 0.1
 
-FREQ_EPOCH_SAVING = 1000  # save model, figures every n epochs
+FREQ_EPOCH_SAVING = 100  # save model, figures every n epochs
 
 
 # Plots are shown every epoch until this number of epochs. After that, only every
 # FREQ_EPOCH_PLOT_SHOW epochs. At the end, all plots are shown again.
-FREQ_EPOCH_PLOT_SHOW = 50
+FREQ_EPOCH_PLOT_SHOW = 5
 
 # in iters if >= N_ITERS show epoch lines in loss plot
 SMOOTHING_WINDOW = 10
@@ -250,6 +251,12 @@ for e in tqdm(
     )
     logger.info(f"Using n_last_states={n_last_states} for epoch {e + 1}")
 
+    # if e == 0:
+    #     _MATCHES_PER_EPOCH = MATCHES_PER_EPOCH
+    #     MATCHES_PER_EPOCH =
+    # elif e == 1:
+    #     MATCHES_PER_EPOCH = _MATCHES_PER_EPOCH
+
     if GEN_EXPERIENCE_BY_EPOCH or e == 0:
         logger.info("Generating experience for epoch %d", e + 1)
 
@@ -264,13 +271,13 @@ for e in tqdm(
             PROGRESS_MESSAGE=f"{Fore.YELLOW}Generating experience for epoch {e + 1}{Style.RESET_ALL}",
             COLLECT_BOARDS=True,
         )
-        logger.info("Initial experience generated.")
     else:
         replay_buffer.empty()
         logger.info(f"Reusing same previous experience for epoch {e + 1}")
 
     replay_buffer.extend(exp)  # type: ignore
-    logger.info(f"Training during epoch with {len(replay_buffer)} experiences.")
+
+    logger.info(f"Training during epoch {e} with {len(replay_buffer)} experiences.")
     for i in range(ITER_PER_EPOCH):
         pbar.update(1)
         # ---- SAMPLE BATCH FROM REPLAY BUFFER ----
@@ -280,7 +287,7 @@ for e in tqdm(
             logger.warning(
                 f"Not enough data to sample a full batch. Expected {BATCH_SIZE}, got {exp_batch.shape[0]}"
             )
-            continue
+            break
         step_i += 1
         # ---- TRAINING STEP ----
         state_action_values, expected_state_action_values = DQN_training_step(
@@ -312,7 +319,7 @@ for e in tqdm(
         # optimizer.zero_grad() # in PPO
 
         # ----------- Update target network
-        if i % N_BATCHS_2_UPDATE_TARGET == 0:
+        if (i + 1) % N_BATCHS_2_UPDATE_TARGET == 0:  # +1 to not update at step 0
             target_net_state_dict = target_net.state_dict()
             policy_net_state_dict = policy_net.state_dict()
             for key in policy_net_state_dict:
