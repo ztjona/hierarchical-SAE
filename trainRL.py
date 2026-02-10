@@ -84,12 +84,12 @@ TEMPERATURE_EXPLORE = 2  # view test of temperature
 # temperature for exploitation, lower values lead to more exploitation
 TEMPERATURE_EXPLOIT = 0.1
 
-FREQ_EPOCH_SAVING = 100  # save model, figures every n epochs
+FREQ_EPOCH_SAVING = -1  # save model, figures every n epochs
 
 
 # Plots are shown every epoch until this number of epochs. After that, only every
 # FREQ_EPOCH_PLOT_SHOW epochs. At the end, all plots are shown again.
-FREQ_EPOCH_PLOT_SHOW = 5
+FREQ_EPOCH_PLOT_SHOW = 10_000_000  # efectivelty disable
 
 # in iters if >= N_ITERS show epoch lines in loss plot
 SMOOTHING_WINDOW = 10
@@ -156,6 +156,7 @@ win_rate: dict[str | int, list[float]] = {}  # list of win rates of epochs by ri
 q_values_history: dict[str, list] = {
     "q_place": [],
     "q_select": [],
+    "rewards": [],  # Track rewards to group Q-values by target
 }  # Track Q-values over epochs
 
 # ###########################
@@ -335,6 +336,9 @@ for e in tqdm(
 
     q_values_history["q_place"].append(q_place)
     q_values_history["q_select"].append(q_select)
+    # Save rewards (only once, they're the same across epochs for the same exp batch)
+    if len(q_values_history["rewards"]) == 0:
+        q_values_history["rewards"].append(exp["reward"])
 
     loss_data["epoch_values"].append(step_i)
 

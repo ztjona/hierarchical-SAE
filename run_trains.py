@@ -17,9 +17,18 @@ from os import path
 from datetime import datetime
 
 
-EXPERIMENT_NAME = "B02replicate"
+EXPERIMENT_NAME = "B03_verLR"
 PARAM_ITERATE = "LR"
-PARAMS = [1e-6, 5e-6, 1e-5, 1e-4, 5e-4, 1e-3]
+# PARAMS = [1e-6, 5e-6, 1e-5, 1e-4, ]
+PARAMS = [
+    # 5e-4,  # already in B02
+    6e-04,
+    7e-04,
+    8e-04,
+    # 1e-3,  # already in B02
+    1.5e-03,
+    2e-03,
+]
 
 # Path to the original training script
 TRAIN_SCRIPT = "trainRL.py"
@@ -71,7 +80,7 @@ def create_training_file(param_value, experiment_name):
     )
 
     # Create training script file
-    output_script_name = f"train_{experiment_name}.py"
+    output_script_name = f"{experiment_name}.py"
     output_path = path.join(OUTPUT_DIR, output_script_name)
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(modified_content)
@@ -95,8 +104,8 @@ def main():
     run_commands = []
 
     for idx, param_value in enumerate(PARAMS, 1):
-        run_id = f"{datetime.now():%m%d}-{idx:1d}"
-        exp_variant_name = f"{EXPERIMENT_NAME}-{PARAM_ITERATE}_{run_id}_{param_value}"
+        run_id = f"({idx:1d}){datetime.now():%m%d}"
+        exp_variant_name = f"{EXPERIMENT_NAME}{run_id}_{PARAM_ITERATE}_{param_value}"
 
         print(
             f"[{idx}/{len(PARAMS)}] Creating file for {PARAM_ITERATE} = {param_value}"

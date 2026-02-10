@@ -213,16 +213,67 @@ def plot_Qv_progress(
 
         for row, col, indices, q_history, title in plot_configs:
             ax = axes[row, col]  # type: ignore
+
+            # Determine target reward from title
+            target_reward = -1 if "R=-1" in title else (0 if "R=0" in title else 1)
+
+            # Plot individual Q-value trajectories
+            q_values_all = []  # Collect all Q-values for computing mean
             for i in indices:
                 q_sample = [q[i].item() for q in q_history]
+                q_values_all.append(q_sample)
                 is_terminal = done_v[i].item() if done_v is not None else False
                 ax.plot(
                     epochs,
                     q_sample,
                     "-",
-                    alpha=0.3 if is_terminal else 0.15,
-                    linewidth=1.5 if is_terminal else 0.5,
+                    alpha=0.2 if is_terminal else 0.1,
+                    linewidth=1.0 if is_terminal else 0.5,
+                    color="gray",
                 )
+
+            # Add reference line at target reward (expected convergence)
+            ax.axhline(
+                y=target_reward,
+                color="red",
+                linestyle="--",
+                linewidth=2,
+                alpha=0.8,
+                label=f"Target={target_reward}",
+            )
+
+            # Plot mean Q-value trajectory with confidence interval
+            if q_values_all:
+                q_array = np.array(q_values_all)  # shape: (n_samples, n_epochs)
+                q_mean = np.mean(q_array, axis=0)
+                q_std = np.std(q_array, axis=0)
+
+                # Mean line
+                ax.plot(
+                    epochs,
+                    q_mean,
+                    "b-",
+                    linewidth=3,
+                    alpha=0.9,
+                    label=f"Mean Q",
+                    zorder=10,
+                )
+
+                # Confidence interval (±1 std)
+                ax.fill_between(
+                    epochs,
+                    q_mean - q_std,
+                    q_mean + q_std,
+                    alpha=0.2,
+                    color="blue",
+                    label="±1 std",
+                )
+
+                # Show final convergence error in title
+                final_error = abs(q_mean[-1] - target_reward)
+                ax.set_title(f"{title}\nFinal Error: {final_error:.3f}")
+            else:
+                ax.set_title(title)
 
             # Only show x-label on bottom row
             if row == 1:
@@ -231,8 +282,8 @@ def plot_Qv_progress(
             if col == 0:
                 ax.set_ylabel("Q-value")
 
-            ax.set_ylim(-1.1, 1.1)
-            ax.set_title(title)
+            ax.set_ylim(-1.2, 1.2)
+            ax.legend(loc="upper right", fontsize=8)
             ax.grid(True, alpha=0.3)
 
     elif PLOT_TYPE == "hist":
