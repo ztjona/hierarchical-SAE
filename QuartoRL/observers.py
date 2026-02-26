@@ -164,7 +164,13 @@ def plot_Qv_progress(
     q_place_history = q_values_history.get("q_place", [])
     q_select_history = q_values_history.get("q_select", [])
 
-    batch_size = q_place_history[0].shape[0] if q_place_history else 0
+    # Use minimum size across all epochs to ensure all indices are valid
+    # This handles cases where different epochs have different numbers of samples
+    if not q_place_history:
+        return
+    
+    min_size_across_epochs = min(q.shape[0] for q in q_place_history)
+    batch_size = min(rewards.shape[0], min_size_across_epochs)
     n_epochs = len(q_place_history)
 
     if batch_size == 0:
