@@ -56,9 +56,9 @@ mode_2x2 = True
 EPOCHS = 10_000
 
 # number of last states to consider in the experience generation at the beginning of training
-N_LAST_STATES_INIT: int = 2
+N_LAST_STATES_INIT = 2
 # number of last states to consider in the experience generation at the end of training. -1 means all states
-N_LAST_STATES_FINAL = 2  # 16 is all states in 4x4 board
+N_LAST_STATES_FINAL = N_LAST_STATES_INIT  # 16 is all states in 4x4 board
 
 MATCHES_PER_EPOCH = 32  # number self-play matches per epoch
 # movs per match * #_matches per epoch (max 16, but avg less)
@@ -99,7 +99,7 @@ Q_PLOT_TYPE = "hist"  # Options: "time_series" or "hist"
 
 # ###########################
 MAX_GRAD_NORM = 1.0
-LR = 5e-5  # initial
+LR = 7e-4  # initial
 LR_F = LR  # not change in LR
 TAU = 0.01  # recommended value by CHATGPT
 # TAU = 0.005
@@ -179,7 +179,9 @@ logger.info(f"Models moved to {device}")
 if STARTING_NET is not None:
     logger.info(f"Loading starting checkpoint from: {STARTING_NET}")
     try:
-        policy_net.load_state_dict(torch.load(STARTING_NET, map_location=device))
+        policy_net.load_state_dict(
+            torch.load(STARTING_NET, map_location=device, weights_only=True)
+        )
         logger.info("Successfully loaded starting checkpoint")
     except FileNotFoundError:
         logger.error(f"Checkpoint file not found: {STARTING_NET}")
@@ -385,7 +387,9 @@ for e in tqdm(
     # ------ Store results
     epochs_results.append(dict(contest_results))
 
-    if (e + 1) % FREQ_EPOCH_SAVING == 0 or (e + 1) == EPOCHS:
+    if (FREQ_EPOCH_SAVING > 0 and (e + 1) % FREQ_EPOCH_SAVING == 0) or (
+        e + 1
+    ) == EPOCHS:
         logger.info("Saving results to disk...")
         pkl_path = path.join(CHECKPOINT_FOLDER, f"{EXPERIMENT_NAME}.pkl")
         with open(pkl_path, "wb") as f:

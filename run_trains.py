@@ -17,18 +17,9 @@ from os import path
 from datetime import datetime
 
 
-EXPERIMENT_NAME = "B03_verLR"
-PARAM_ITERATE = "LR"
-# PARAMS = [1e-6, 5e-6, 1e-5, 1e-4, ]
-PARAMS = [
-    # 5e-4,  # already in B02
-    6e-04,
-    7e-04,
-    8e-04,
-    # 1e-3,  # already in B02
-    1.5e-03,
-    2e-03,
-]
+EXPERIMENT_NAME = "C01b_validate_N8"
+PARAM_ITERATE = "N_LAST_STATES_INIT"
+PARAMS = [4, 8, 16, 12]
 
 # Path to the original training script
 TRAIN_SCRIPT = "trainRL.py"
@@ -117,9 +108,9 @@ def main():
             created_files.append(script_path)
 
             if idx == len(PARAMS):
-                run_commands.append(f"./runpy.sh {script_path}")
+                run_commands.append(f'./runpy.sh "{script_path}"')
             else:
-                run_commands.append(f"./runpy.sh --no_echo {script_path} &")
+                run_commands.append(f'./runpy.sh --no_echo "{script_path}" &')
         except Exception as e:
             print(f"Failed to create file for {param_value}: {e}")
 
