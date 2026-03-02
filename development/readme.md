@@ -1,0 +1,1 @@
+Auxiliary files for updates made in the project.
