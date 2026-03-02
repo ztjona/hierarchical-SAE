@@ -53,7 +53,7 @@ BATCH_SIZE = 32
 mode_2x2 = True
 
 # every epoch experience is generated with a new bot instance, models are saved at the end of each epoch
-EPOCHS = 10_000
+EPOCHS = 5_000
 
 # number of last states to consider in the experience generation at the beginning of training
 N_LAST_STATES_INIT = 2
@@ -61,21 +61,21 @@ N_LAST_STATES_INIT = 2
 N_LAST_STATES_FINAL = N_LAST_STATES_INIT  # 16 is all states in 4x4 board
 
 MATCHES_PER_EPOCH = 32  # number self-play matches per epoch
+NUM_EPOCHs_BUFFER = 8  # number of epochs to keep in the replay buffer, if GEN_EXPERIENCE_BY_EPOCH is True. If False, this parameter is ignored and only the experience of the first epoch is kept in the buffer.
+
 # movs per match * #_matches per epoch (max 16, but avg less)
 STEPS_PER_EPOCH = N_LAST_STATES_FINAL * MATCHES_PER_EPOCH
-# number of times the network is updated per epoch
-ITER_PER_EPOCH = STEPS_PER_EPOCH // BATCH_SIZE
 
 if GEN_EXPERIENCE_BY_EPOCH:
     # EPOCHs x STEPS_PER_EPOCH
     # N epochs (DATA from the last)
-    REPLAY_SIZE = 128 * STEPS_PER_EPOCH
+    REPLAY_SIZE = NUM_EPOCHs_BUFFER * STEPS_PER_EPOCH
 else:
     # only STEPS_PER_EPOCH, DATA from the first epoch
     REPLAY_SIZE = STEPS_PER_EPOCH
 
-# update target network every n batches processed, ~x3/epoch
-N_BATCHS_2_UPDATE_TARGET = max(ITER_PER_EPOCH // 3, ITER_PER_EPOCH)  # to avoid mod 0.
+# update target network every N gradient updates (soft update with TAU)
+TARGET_UPDATE_FREQ = 3  # every 3 gradient steps
 
 
 # temperature for exploration, higher values lead to more exploration
@@ -137,7 +137,7 @@ logger.info(
     f"Train conf.:\t{EPOCHS=}, {BATCH_SIZE=}, {LR=}, {LR_F=}, {GAMMA=}, {TAU=}, {MAX_GRAD_NORM=}"
 )
 logger.info(f"Exp. gen.:\t{MATCHES_PER_EPOCH=}, {STEPS_PER_EPOCH=}, {REPLAY_SIZE=}")
-logger.info(f"Network updates:\t{ITER_PER_EPOCH=}, {N_BATCHS_2_UPDATE_TARGET=}")
+logger.info(f"Network updates:\tFull buffer sweep each epoch, {TARGET_UPDATE_FREQ=}")
 logger.info(f"Exploration:\t{TEMPERATURE_EXPLORE=}, {TEMPERATURE_EXPLOIT=}")
 logger.info(f"N_LAST_STATES:\tINIT={N_LAST_STATES_INIT}, FINAL={N_LAST_STATES_FINAL}")
 logger.info(f"LOSS_APPROACH={LOSS_APPROACH}")
@@ -220,14 +220,6 @@ loss_data: dict[str, list[float | int]] = {
 # ###########################
 init(autoreset=True)  # COLORAMA
 
-pbar = tqdm(
-    total=EPOCHS * ITER_PER_EPOCH,
-    desc=f"{Fore.CYAN}\n Update network{Style.RESET_ALL}",
-    leave=True,
-    position=1,
-    unit="Iter.",
-)
-
 logger.info("Hyperparameters loaded.")
 logger.info("Starting training...")
 
@@ -280,9 +272,11 @@ for e in tqdm(
 
     replay_buffer.extend(exp)  # type: ignore
 
-    logger.info(f"Training during epoch {e} with {len(replay_buffer)} experiences.")
-    for i in range(ITER_PER_EPOCH):
-        pbar.update(1)
+    iter_per_epoch = max(len(replay_buffer) // BATCH_SIZE, 1)  # full sweep of buffer
+    logger.info(
+        f"Training during epoch {e} with {len(replay_buffer)} experiences, {iter_per_epoch} iterations."
+    )
+    for i in range(iter_per_epoch):
         # ---- SAMPLE BATCH FROM REPLAY BUFFER ----
         exp_batch = replay_buffer.sample(BATCH_SIZE)
 
@@ -322,7 +316,7 @@ for e in tqdm(
         # optimizer.zero_grad() # in PPO
 
         # ----------- Update target network
-        if (i + 1) % N_BATCHS_2_UPDATE_TARGET == 0:  # +1 to not update at step 0
+        if (i + 1) % TARGET_UPDATE_FREQ == 0:  # +1 to not update at step 0
             target_net_state_dict = target_net.state_dict()
             policy_net_state_dict = policy_net.state_dict()
             for key in policy_net_state_dict:

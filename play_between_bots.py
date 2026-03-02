@@ -25,16 +25,23 @@ from pprint import pprint
 _f = "CHECKPOINTS//EXP_id03//20250922_1920-EXP_id03_epoch_0377.pt"
 _f2 = "CHECKPOINTS//EXP_id03//20250922_1247-EXP_id03_epoch_0000.pt"
 _fgood = "CHECKPOINTS//EXP_id03//20250922_1247-EXP_id03_epoch_0009.pt"
-_fgood2 = "CHECKPOINTS//E02_win_rate//20251023_1326-E02_win_rate_epoch_0031.pt"
+# _fgood2 = "CHECKPOINTS//E02_win_rate//20251023_1326-E02_win_rate_epoch_0031.pt"
 _fgood2B = "CHECKPOINTS//REF//20251023_1649-_E02_win_rate_epoch_0022.pt"
-_f_loss = "CHECKPOINTS\\LOSS_APPROACHs_1212-2_only_select\\20251213_1126-LOSS_APPROACHs_1212-2_only_select_E_3970.pt"
 _f_loss_BT = "CHECKPOINTS\\LOSS_APPROACHs_1212-2_only_select\\20251212_2206-LOSS_APPROACHs_1212-2_only_select_E_1034.pt"
+_f_B02rep = "CHECKPOINTS\\B02replicate(5)0121_LR_0.001\\20260123_0255-B02replicate(5)0121_LR_0.001_E_9997.pt"
+_f_Aa_replay = "CHECKPOINTS\\Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8\\20260227_1103-Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8_E_5000.pt"
 
 _fFrancis_dec = (
     "CHECKPOINTS//Francis//20251204_0932-ba_increasing_n_last_states_epoch_0505.pt"
 )
-bot_loss = Quarto_bot(
-    model_path=_f_loss,
+bot_Aa_replay = Quarto_bot(
+    model_path=_f_Aa_replay,
+    model_class=QuartoCNN_uncoupled,
+    deterministic=False,
+    temperature=0.1,
+)
+bot_B02rep = Quarto_bot(
+    model_path=_f_B02rep,
     model_class=QuartoCNN_uncoupled,
     deterministic=False,
     temperature=0.1,
@@ -77,11 +84,17 @@ bot_Michael2 = Quarto_bot(model_path=_f_M2, deterministic=False, temperature=0.1
 # bot_A_m = "bot_M2"
 # bot_A = bot_rand
 # bot_A_m = "bot_random"
+# bot_A = bot_loss
+# bot_A_m = "bot_loss"
+bot_A = bot_B02rep
+bot_A_m = "bot_B02rep(5)9800"
 
+bot_A = bot_Aa_replay
+bot_A_m = "bot_Aa_replay"
+# bot_B = bot_rand
+# bot_B_m = "bot_random"
 bot_B = bot_loss_BT
 bot_B_m = "bot_loss BT"
-bot_A = bot_loss
-bot_A_m = "bot_loss"
 # bot_B = bot_francis
 # bot_B_m = "bot_francis"
 # bot_B = bot_Michael

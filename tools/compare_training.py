@@ -27,6 +27,7 @@ import pickle
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import plotly.colors as pc
 from pathlib import Path
 import re
 import colorsys
@@ -39,7 +40,8 @@ from tqdm import tqdm
 #   EXPERIMENT_NAME = ["B02replicate", "B03_verLR"]  # Multiple experiments
 # EXPERIMENT_NAME = "B02replicate"  # or ["B02replicate", "B03_verLR"] for combined
 # EXPERIMENT_NAME = ["B02replicate", "B03_verLR"]  # for combined
-EXPERIMENT_NAME = "C01b_validate_N8"
+# EXPERIMENT_NAME = "C01b_validate_N8" # previous results invalid!
+EXPERIMENT_NAME = "Aa_replay"
 
 # BASELINEs: Include specific runs from previous experiments as reference points
 # Format: List of dicts mapping experiment name to list of parameter values
@@ -58,7 +60,8 @@ BASELINEs = [{"B02replicate": [1e-3, 5e-4]}, {"B03_verLR": [7e-4, 2e-3]}]
 # BASELINEs = []  # Disable baselines
 
 CHECKPOINT_BASE = "./CHECKPOINTS/"
-PARAM_NAME = "N_LAST_STATES_INIT"  # Parameter being varied
+PARAM_NAME = "NUM_EPOCHs_BUFFER"  # Parameter being varied
+# PARAM_NAME = "N_LAST_STATES_INIT"  # Parameter being varied
 
 
 # Plot toggles - set to False to disable specific plots
@@ -87,22 +90,29 @@ def generate_rainbow_colors(n):
     """Generate n evenly-spaced rainbow colors from blue to red."""
     colors = []
     for i in range(n):
-        # HSV: Hue from 240° (blue) to 0° (red), going through the rainbow
-        # 240° = 0.667 in [0,1], 0° = 0.0
-        hue = 0.667 - (i / max(n - 1, 1)) * 0.667  # From blue to red
-        saturation = 0.85  # High saturation for vivid colors
-        value = 0.90  # High value for brightness
-
-        # Convert HSV to RGB
-        r, g, b = colorsys.hsv_to_rgb(hue, saturation, value)
-
-        # Convert to hex
-        hex_color = "#{:02x}{:02x}{:02x}".format(
-            int(r * 255), int(g * 255), int(b * 255)
+        hue = 0.667 - (i / max(n - 1, 1)) * 0.667  # blue to red
+        r, g, b = colorsys.hsv_to_rgb(hue, 0.85, 0.90)
+        colors.append(
+            "#{:02x}{:02x}{:02x}".format(int(r * 255), int(g * 255), int(b * 255))
         )
-        colors.append(hex_color)
-
     return colors
+
+
+def assign_colors(folders):
+    """Assign colors: rainbow (blue→red) for experiments, Dark2 palette for baselines."""
+    exp_indices = [i for i, f in enumerate(folders) if not f.get("is_baseline", False)]
+    base_indices = [i for i, f in enumerate(folders) if f.get("is_baseline", False)]
+
+    exp_colors = generate_rainbow_colors(len(exp_indices))
+    base_palette = pc.qualitative.Dark2
+
+    color_map = {}
+    for j, idx in enumerate(exp_indices):
+        color_map[idx] = exp_colors[j]
+    for j, idx in enumerate(base_indices):
+        color_map[idx] = base_palette[j % len(base_palette)]
+
+    return [color_map[i] for i in range(len(folders))]
 
 
 def format_param_value(value):
@@ -249,8 +259,7 @@ def plot_losses(all_data, folders):
     """Create interactive Plotly plot for loss comparison."""
     fig = go.Figure()
 
-    # Generate rainbow colors based on number of variants
-    colors = generate_rainbow_colors(len(folders))
+    colors = assign_colors(folders)
 
     smoothing_window = 50  # Moving average window
 
@@ -259,6 +268,7 @@ def plot_losses(all_data, folders):
             continue
 
         loss_values = data["loss_values"]["loss_values"]
+        epoch_boundaries = data["loss_values"].get("epoch_values", [])
         param_value = folder_info["param_value"]
         is_baseline = folder_info.get("is_baseline", False)
         exp_name = folder_info.get("experiment", "")
@@ -271,10 +281,17 @@ def plot_losses(all_data, folders):
         else:
             smoothed = loss_values
 
-        x_values = list(range(len(smoothed)))
+        # Convert iteration indices to epoch numbers using epoch_boundaries
+        # epoch_boundaries[i] = last iteration index of epoch i
+        if len(epoch_boundaries) > 0:
+            iter_indices = np.arange(len(smoothed))
+            # searchsorted: for each iteration, find which epoch it belongs to
+            x_values = np.searchsorted(epoch_boundaries, iter_indices, side="left")
+        else:
+            x_values = list(range(len(smoothed)))
 
         # Visual distinction for baselines: dashed line, reduced opacity
-        line_style = "dash" if is_baseline else "solid"
+        line_style = "dot" if is_baseline else "solid"
         opacity = 0.6 if is_baseline else 0.8
         width = 2.0 if is_baseline else 2.5
         name_prefix = f"[{exp_name}] " if is_baseline else ""
@@ -288,19 +305,19 @@ def plot_losses(all_data, folders):
                 name=f"{name_prefix}{PARAM_NAME}={param_str}",
                 line=dict(color=colors[idx], width=width, dash=line_style),
                 opacity=opacity,
-                hovertemplate=f"<b>{name_prefix}{PARAM_NAME}={param_str}</b><br>Iter: %{{x}}<br>Loss: %{{y:.4f}}<extra></extra>",
+                hovertemplate=f"<b>{name_prefix}{PARAM_NAME}={param_str}</b><br>Epoch: %{{x}}<br>Loss: %{{y:.4f}}<extra></extra>",
             )
         )
 
     fig.update_layout(
         title=f"Training Loss Comparison - {EXPERIMENT_NAME}",
-        xaxis_title="Training Iteration",
+        xaxis_title="Epoch",
         yaxis_title="Loss (Smoothed)",
         hovermode="x unified",
         template="plotly_white",
-        width=1200,
-        height=600,
+        autosize=True,
         legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99),
+        margin=dict(l=60, r=20, t=50, b=50),
     )
 
     return fig
@@ -330,8 +347,7 @@ def plot_win_rates(all_data, folders):
         horizontal_spacing=0.12,
     )
 
-    # Generate rainbow colors based on number of variants
-    colors = generate_rainbow_colors(len(folders))
+    colors = assign_colors(folders)
 
     smoothing_window = 100  # Moving average window for win rates
 
@@ -345,7 +361,7 @@ def plot_win_rates(all_data, folders):
         win_rate_data = data.get("win_rate", {})
 
         # Visual distinction for baselines
-        line_style = "dash" if is_baseline else "solid"
+        line_style = "dot" if is_baseline else "solid"
         opacity = 0.6 if is_baseline else 0.8
         width = 2.0 if is_baseline else 2.5
         name_prefix = f"[{exp_name}] " if is_baseline else ""
@@ -396,9 +412,9 @@ def plot_win_rates(all_data, folders):
     fig.update_layout(
         title_text=f"Win Rate Comparison - {EXPERIMENT_NAME}",
         template="plotly_white",
-        width=1400,  # Optimized for 2 rivals (700px each)
-        height=600,
+        autosize=True,
         hovermode="x unified",
+        margin=dict(l=60, r=20, t=50, b=50),
     )
 
     # Update y-axes
@@ -432,7 +448,7 @@ def plot_sample_efficiency(all_data, folders):
     if not rival_names:
         return None
 
-    colors = generate_rainbow_colors(len(folders))
+    colors = assign_colors(folders)
 
     # Create subplots for 2 rivals
     fig = make_subplots(
@@ -488,9 +504,9 @@ def plot_sample_efficiency(all_data, folders):
     fig.update_layout(
         title_text=f"Sample Efficiency - {EXPERIMENT_NAME}",
         template="plotly_white",
-        width=1400,  # Optimized for 2 rivals
-        height=600,
+        autosize=True,
         hovermode="x unified",
+        margin=dict(l=60, r=20, t=50, b=50),
     )
 
     for rival_idx in range(2):
@@ -521,7 +537,7 @@ def plot_stability(all_data, folders):
     if not rival_names:
         return None
 
-    colors = generate_rainbow_colors(len(folders))
+    colors = assign_colors(folders)
 
     # Create subplots for 2 rivals
     fig = make_subplots(
@@ -569,9 +585,9 @@ def plot_stability(all_data, folders):
     fig.update_layout(
         title_text=f"Training Stability (Rolling StdDev, window={window}) - {EXPERIMENT_NAME}",
         template="plotly_white",
-        width=1400,  # Optimized for 2 rivals
-        height=600,
+        autosize=True,
         hovermode="x unified",
+        margin=dict(l=60, r=20, t=50, b=50),
     )
 
     for rival_idx in range(2):
@@ -592,7 +608,7 @@ def plot_q_values(all_data, folders):
         print("  ⚠ No Q-value data found in pickle files")
         return None
 
-    colors = generate_rainbow_colors(len(folders))
+    colors = assign_colors(folders)
 
     # Create subplots for place and select Q-values
     fig = make_subplots(
@@ -800,9 +816,9 @@ def plot_q_values(all_data, folders):
     fig.update_layout(
         title_text=f"Q-Value Evolution - {EXPERIMENT_NAME}<br><sub>Grouped by target reward: solid=Loss(-1), dot=Draw(0), dash=Win(+1)</sub>",
         template="plotly_white",
-        width=1200,
-        height=600,
+        autosize=True,
         hovermode="x unified",
+        margin=dict(l=60, r=20, t=70, b=50),
     )
 
     fig.update_xaxes(title_text="Epoch", row=1, col=1)
@@ -828,7 +844,7 @@ def plot_loss_vs_winrate(all_data, folders):
     if not rival_names:
         return None
 
-    colors = generate_rainbow_colors(len(folders))
+    colors = assign_colors(folders)
 
     # Create subplots for 2 rivals
     fig = make_subplots(
@@ -908,8 +924,8 @@ def plot_loss_vs_winrate(all_data, folders):
     fig.update_layout(
         title_text=f"Loss vs Win Rate Trade-off - {EXPERIMENT_NAME}<br><sub>Marker size indicates stability</sub>",
         template="plotly_white",
-        width=1400,  # Optimized for 2 rivals
-        height=600,
+        autosize=True,
+        margin=dict(l=60, r=20, t=70, b=50),
     )
 
     for rival_idx in range(2):
@@ -998,8 +1014,8 @@ def plot_performance_heatmap(all_data, folders):
     fig.update_layout(
         title_text=f"Performance Heatmap Over Time - {EXPERIMENT_NAME}",
         template="plotly_white",
-        width=1400,  # Optimized for 2 rivals (700px each)
-        height=600,
+        autosize=True,
+        margin=dict(l=60, r=20, t=50, b=50),
     )
 
     for rival_idx in range(2):
