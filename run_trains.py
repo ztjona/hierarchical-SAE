@@ -17,16 +17,23 @@ from os import path
 from datetime import datetime
 
 
-# INVALID results
+# INVALID results and before
 # EXPERIMENT_NAME = "C01b_validate_N8"
 # PARAM_ITERATE = "N_LAST_STATES_INIT"
 # PARAMS = [4, 8, 16, 12]
 
+# ----- VALID results
 # Fixing bug of replay buffer size by epoch
-EXPERIMENT_NAME = "Aa_replay"
-PARAM_ITERATE = "NUM_EPOCHs_BUFFER"
-# The previous experiments can be considered to be set as 1.
-PARAMS = [2, 8, 128, 512, 1024, 64]
+# EXPERIMENT_NAME = "Aa_replay"
+# PARAM_ITERATE = "NUM_EPOCHs_BUFFER"
+# # The previous experiments can be considered to be set as 1.
+# PARAMS = [2, 8, 128, 512, 1024, 64]
+
+# VALID results
+# Fixing bug of replay buffer size by epoch
+EXPERIMENT_NAME = "Ab_data"
+PARAM_ITERATE = "N_LAST_STATES_INIT"
+PARAMS = [4, 12, 16, 8]
 
 # Path to the original training script
 TRAIN_SCRIPT = "trainRL.py"

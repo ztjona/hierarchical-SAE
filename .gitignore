@@ -1,7 +1,7 @@
 .vscode/
-partidas_guardadas/
 logs/**.log
 train_scripts/**.py
+train_scripts/legacy/**.py
 
 *pkl
 # images
