@@ -31,8 +31,10 @@ from tqdm import tqdm
 # EXPERIMENT_NAME = "C01b_validate_N8" # previous results invalid!
 # EXPERIMENT_NAME = "Aa_replay"
 # PARAM_NAME = "NUM_EPOCHs_BUFFER"  # Parameter being varied
-EXPERIMENT_NAME = "Ab_data"
-PARAM_NAME = "N_LAST_STATES_INIT"
+# EXPERIMENT_NAME = "Ab_data"
+# PARAM_NAME = "N_LAST_STATES_INIT"
+EXPERIMENT_NAME = "Ac_fine"
+PARAM_NAME = "LR"
 
 # BASELINEs: Include specific runs from previous experiments as reference points
 # Format: List of dicts mapping experiment name to list of parameter values
@@ -41,12 +43,7 @@ PARAM_NAME = "N_LAST_STATES_INIT"
 #   - Includes runs with LR=1e-3 and LR=5e-4 from B02replicate
 #   - Includes runs with LR=7e-4 and LR=2e-3 from B03_verLR
 #   [{"B02replicate": [1e-3]}]  # Include only one specific run
-# Set to [] or None to disable baselines
-#
-# Baselines are shown with visual distinction:
-#   - Dashed lines in line plots
-#   - Hollow markers in scatter plots
-#   - [Experiment Name] prefix in legend
+
 BASELINEs = [
     {"B02replicate": [1e-3, 5e-4]},
     {"B03_verLR": [7e-4, 2e-3]},

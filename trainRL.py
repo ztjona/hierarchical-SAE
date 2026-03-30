@@ -32,9 +32,9 @@ import matplotlib.pyplot as plt
 # ---- PARAMS ----
 logger.info("Imports done.")
 
-# STARTING_NET = "CHECKPOINTS//REF//20251023_1649-_E02_win_rate_epoch_0022.pt"
-STARTING_NET = None  # Set to None to start with random weights
-EXPERIMENT_NAME = "B02_verify"
+STARTING_NET = "CHECKPOINTS\\Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8\\20260227_1103-Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8_E_5000.pt"
+# STARTING_NET = None  # Set to None to start with random weights
+EXPERIMENT_NAME = "Ac_fine"
 CHECKPOINT_FOLDER = f"./CHECKPOINTS/{EXPERIMENT_NAME}/"
 # ARCHITECTURE = QuartoCNN
 ARCHITECTURE = QuartoCNN_uncoupled
@@ -56,9 +56,9 @@ mode_2x2 = True
 EPOCHS = 5_000
 
 # number of last states to consider in the experience generation at the beginning of training
-N_LAST_STATES_INIT = 2
+N_LAST_STATES_INIT = 2  # Match Aa_replay(2) training distribution for fine-tuning
 # number of last states to consider in the experience generation at the end of training. -1 means all states
-N_LAST_STATES_FINAL = N_LAST_STATES_INIT  # 16 is all states in 4x4 board
+N_LAST_STATES_FINAL = 8  # Gradually expand, don't jump to 16
 
 MATCHES_PER_EPOCH = 32  # number self-play matches per epoch
 NUM_EPOCHs_BUFFER = 8  # number of epochs to keep in the replay buffer, if GEN_EXPERIENCE_BY_EPOCH is True. If False, this parameter is ignored and only the experience of the first epoch is kept in the buffer.
@@ -84,7 +84,7 @@ TEMPERATURE_EXPLORE = 2  # view test of temperature
 # temperature for exploitation, lower values lead to more exploitation
 TEMPERATURE_EXPLOIT = 0.1
 
-FREQ_EPOCH_SAVING = -1  # save model, figures every n epochs
+FREQ_EPOCH_SAVING = 100  # save model, figures every n epochs
 
 
 # Plots are shown every epoch until this number of epochs. After that, only every
