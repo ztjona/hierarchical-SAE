@@ -31,9 +31,15 @@ from datetime import datetime
 
 # VALID results
 # Fixing bug of replay buffer size by epoch
-EXPERIMENT_NAME = "Ab_data"
-PARAM_ITERATE = "N_LAST_STATES_INIT"
-PARAMS = [4, 12, 16, 8]
+# EXPERIMENT_NAME = "Ab_data"
+# PARAM_ITERATE = "N_LAST_STATES_INIT"
+# PARAMS = [4, 12, 16, 8]
+# VALID results
+
+# Fixing bug of replay buffer size by epoch
+EXPERIMENT_NAME = "Ac_fine"
+PARAM_ITERATE = "LR"
+PARAMS = [1e-4, 3.5e-4, 5e-4, 1e-5, 5e-5, 5e-6, 7e-4]
 
 # Path to the original training script
 TRAIN_SCRIPT = "trainRL.py"
