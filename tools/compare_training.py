@@ -33,7 +33,8 @@ from tqdm import tqdm
 # PARAM_NAME = "NUM_EPOCHs_BUFFER"  # Parameter being varied
 # EXPERIMENT_NAME = "Ab_data"
 # PARAM_NAME = "N_LAST_STATES_INIT"
-EXPERIMENT_NAME = "Ac_fine"
+# EXPERIMENT_NAME = "Ac_fine"
+EXPERIMENT_NAME = "Ac_fineShallow"
 PARAM_NAME = "LR"
 
 # BASELINEs: Include specific runs from previous experiments as reference points

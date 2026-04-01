@@ -53,7 +53,7 @@ BATCH_SIZE = 32
 mode_2x2 = True
 
 # every epoch experience is generated with a new bot instance, models are saved at the end of each epoch
-EPOCHS = 5_000
+EPOCHS = 10_000
 
 # number of last states to consider in the experience generation at the beginning of training
 N_LAST_STATES_INIT = 2  # Match Aa_replay(2) training distribution for fine-tuning
@@ -101,7 +101,7 @@ Q_PLOT_TYPE = "hist"  # Options: "time_series" or "hist"
 MAX_GRAD_NORM = 1.0
 LR = 7e-4  # initial
 LR_F = LR  # not change in LR
-TAU = 0.01  # recommended value by CHATGPT
+TAU = 0.005  # recommended value by CHATGPT
 # TAU = 0.005
 GAMMA = 0.99
 
