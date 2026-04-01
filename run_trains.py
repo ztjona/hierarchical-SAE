@@ -37,7 +37,7 @@ from datetime import datetime
 # VALID results
 
 # Fixing bug of replay buffer size by epoch
-EXPERIMENT_NAME = "Ac_fine"
+EXPERIMENT_NAME = "Ac_fineShallow"
 PARAM_ITERATE = "LR"
 PARAMS = [1e-4, 3.5e-4, 5e-4, 1e-5, 5e-5, 5e-6, 7e-4]
 
