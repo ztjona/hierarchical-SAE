@@ -32,9 +32,9 @@ import matplotlib.pyplot as plt
 # ---- PARAMS ----
 logger.info("Imports done.")
 
-STARTING_NET = "CHECKPOINTS\\Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8\\20260227_1103-Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8_E_5000.pt"
-# STARTING_NET = None  # Set to None to start with random weights
-EXPERIMENT_NAME = "Ac_fine"
+# STARTING_NET = "CHECKPOINTS\\Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8\\20260227_1103-Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8_E_5000.pt"
+STARTING_NET = None  # Set to None to start with random weights
+EXPERIMENT_NAME = "Ad_states_endgame"
 CHECKPOINT_FOLDER = f"./CHECKPOINTS/{EXPERIMENT_NAME}/"
 # ARCHITECTURE = QuartoCNN
 ARCHITECTURE = QuartoCNN_uncoupled
@@ -56,12 +56,18 @@ mode_2x2 = True
 EPOCHS = 10_000
 
 # number of last states to consider in the experience generation at the beginning of training
-N_LAST_STATES_INIT = 2  # Match Aa_replay(2) training distribution for fine-tuning
+N_LAST_STATES_INIT = 3  # One more than Aa_replay(2) to test Q_select learning
 # number of last states to consider in the experience generation at the end of training. -1 means all states
-N_LAST_STATES_FINAL = 8  # Gradually expand, don't jump to 16
+N_LAST_STATES_FINAL = N_LAST_STATES_INIT  # No curriculum, constant N=3
 
 MATCHES_PER_EPOCH = 32  # number self-play matches per epoch
 NUM_EPOCHs_BUFFER = 8  # number of epochs to keep in the replay buffer, if GEN_EXPERIENCE_BY_EPOCH is True. If False, this parameter is ignored and only the experience of the first epoch is kept in the buffer.
+
+# Fraction of each training batch that comes from end-game-only experience (n_last_states=2).
+# This anchors the model on states it already knows, preventing catastrophic forgetting
+# during curriculum expansion. 0.0 disables the endgame buffer.
+ENDGAME_FRACTION = 0  # disabled for from-scratch training
+N_LAST_STATES_ENDGAME = 2  # must match pre-trained model's training distribution
 
 # movs per match * #_matches per epoch (max 16, but avg less)
 STEPS_PER_EPOCH = N_LAST_STATES_FINAL * MATCHES_PER_EPOCH
@@ -84,12 +90,12 @@ TEMPERATURE_EXPLORE = 2  # view test of temperature
 # temperature for exploitation, lower values lead to more exploitation
 TEMPERATURE_EXPLOIT = 0.1
 
-FREQ_EPOCH_SAVING = 100  # save model, figures every n epochs
+FREQ_EPOCH_SAVING = 500  # save model, figures every n epochs
 
 
 # Plots are shown every epoch until this number of epochs. After that, only every
 # FREQ_EPOCH_PLOT_SHOW epochs. At the end, all plots are shown again.
-FREQ_EPOCH_PLOT_SHOW = 10_000_000  # efectivelty disable
+FREQ_EPOCH_PLOT_SHOW = 500  # efectivelty disable
 
 # in iters if >= N_ITERS show epoch lines in loss plot
 SMOOTHING_WINDOW = 10
@@ -99,9 +105,9 @@ Q_PLOT_TYPE = "hist"  # Options: "time_series" or "hist"
 
 # ###########################
 MAX_GRAD_NORM = 1.0
-LR = 7e-4  # initial
+LR = 7e-4  # match Aa_replay(2)
 LR_F = LR  # not change in LR
-TAU = 0.005  # recommended value by CHATGPT
+TAU = 0.01  # match Aa_replay(2)
 # TAU = 0.005
 GAMMA = 0.99
 
@@ -140,6 +146,9 @@ logger.info(f"Exp. gen.:\t{MATCHES_PER_EPOCH=}, {STEPS_PER_EPOCH=}, {REPLAY_SIZE
 logger.info(f"Network updates:\tFull buffer sweep each epoch, {TARGET_UPDATE_FREQ=}")
 logger.info(f"Exploration:\t{TEMPERATURE_EXPLORE=}, {TEMPERATURE_EXPLOIT=}")
 logger.info(f"N_LAST_STATES:\tINIT={N_LAST_STATES_INIT}, FINAL={N_LAST_STATES_FINAL}")
+logger.info(
+    f"ENDGAME_FRACTION={ENDGAME_FRACTION}, N_LAST_STATES_ENDGAME={N_LAST_STATES_ENDGAME}"
+)
 logger.info(f"LOSS_APPROACH={LOSS_APPROACH}")
 logger.info(f"REWARD_FUNCTION={REWARD_FUNCTION}")
 
@@ -201,6 +210,13 @@ policy_net.export_model(CKPT_NAME_GEN(0), CHECKPOINT_FOLDER)
 # ###########################
 replay_buffer = ReplayBuffer(
     storage=LazyTensorStorage(max_size=REPLAY_SIZE),
+    sampler=SamplerWithoutReplacement(),
+)
+
+# Endgame replay buffer: keeps end-game-only experience to anchor Q-values
+ENDGAME_REPLAY_SIZE = NUM_EPOCHs_BUFFER * N_LAST_STATES_ENDGAME * MATCHES_PER_EPOCH
+endgame_replay_buffer = ReplayBuffer(
+    storage=LazyTensorStorage(max_size=ENDGAME_REPLAY_SIZE),
     sampler=SamplerWithoutReplacement(),
 )
 
@@ -266,6 +282,20 @@ for e in tqdm(
             PROGRESS_MESSAGE=f"{Fore.YELLOW}Generating experience for epoch {e + 1}{Style.RESET_ALL}",
             COLLECT_BOARDS=True,
         )
+
+        # ---- GENERATE ENDGAME EXPERIENCE (anchoring) ----
+        if ENDGAME_FRACTION > 0:
+            endgame_exp = gen_experience(
+                p1_bot=p1,
+                p2_bot=p2,
+                n_last_states=N_LAST_STATES_ENDGAME,
+                number_of_matches=MATCHES_PER_EPOCH,
+                mode_2x2=mode_2x2,
+                REWARD_FUNCTION_TYPE=REWARD_FUNCTION,
+                PROGRESS_MESSAGE=f"{Fore.CYAN}Generating endgame experience for epoch {e + 1}{Style.RESET_ALL}",
+                COLLECT_BOARDS=False,
+            )
+            endgame_replay_buffer.extend(endgame_exp)  # type: ignore
     else:
         replay_buffer.empty()
         logger.info(f"Reusing same previous experience for epoch {e + 1}")
@@ -278,7 +308,19 @@ for e in tqdm(
     )
     for i in range(iter_per_epoch):
         # ---- SAMPLE BATCH FROM REPLAY BUFFER ----
-        exp_batch = replay_buffer.sample(BATCH_SIZE)
+        if ENDGAME_FRACTION > 0 and len(endgame_replay_buffer) > 0:
+            endgame_size = max(1, round(BATCH_SIZE * ENDGAME_FRACTION))
+            curriculum_size = BATCH_SIZE - endgame_size
+            # Sample from both buffers and concatenate
+            endgame_batch = endgame_replay_buffer.sample(
+                min(endgame_size, len(endgame_replay_buffer))
+            )
+            curriculum_batch = replay_buffer.sample(
+                min(curriculum_size, len(replay_buffer))
+            )
+            exp_batch = torch.cat([curriculum_batch, endgame_batch], dim=0)
+        else:
+            exp_batch = replay_buffer.sample(BATCH_SIZE)
 
         if exp_batch.shape[0] < BATCH_SIZE:
             logger.warning(

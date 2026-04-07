@@ -34,8 +34,8 @@ from tqdm import tqdm
 # EXPERIMENT_NAME = "Ab_data"
 # PARAM_NAME = "N_LAST_STATES_INIT"
 # EXPERIMENT_NAME = "Ac_fine"
-EXPERIMENT_NAME = "Ac_fineShallow"
-PARAM_NAME = "LR"
+EXPERIMENT_NAME = "Ad_states_endgame"
+PARAM_NAME = "N_LAST_STATES_INIT"
 
 # BASELINEs: Include specific runs from previous experiments as reference points
 # Format: List of dicts mapping experiment name to list of parameter values
@@ -46,9 +46,13 @@ PARAM_NAME = "LR"
 #   [{"B02replicate": [1e-3]}]  # Include only one specific run
 
 BASELINEs = [
-    {"B02replicate": [1e-3, 5e-4]},
-    {"B03_verLR": [7e-4, 2e-3]},
+    {"B02replicate": [5e-4]},
+    # {"B02replicate": [1e-3, 5e-4]},
+    # {"B03_verLR": [7e-4, 2e-3]},
+    {"B03_verLR": [2e-3]},
     {"Aa_replay": [8, 1024]},
+    {"Ab_data": [8]},
+    # {"Ab_data": [4, 8, 12]},
 ]
 # BASELINEs = []  # Disable baselines
 

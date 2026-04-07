@@ -37,9 +37,16 @@ from datetime import datetime
 # VALID results
 
 # Fixing bug of replay buffer size by epoch
-EXPERIMENT_NAME = "Ac_fineShallow"
-PARAM_ITERATE = "LR"
-PARAMS = [1e-4, 3.5e-4, 5e-4, 1e-5, 5e-5, 5e-6, 7e-4]
+# EXPERIMENT_NAME = "Ac_fineShallow"
+# PARAM_ITERATE = "LR"
+# PARAMS = [1e-4, 3.5e-4, 5e-4, 1e-5, 5e-5, 5e-6, 7e-4]
+
+# EXPERIMENT_NAME = "Ad_endgame"
+# PARAM_ITERATE = "ENDGAME_FRACTION"
+# PARAMS = [0.25, 0.5, 0.75]
+EXPERIMENT_NAME = "Ad_states_endgame"
+PARAM_ITERATE = "N_LAST_STATES_INIT"
+PARAMS = [3, 4, 5]
 
 # Path to the original training script
 TRAIN_SCRIPT = "trainRL.py"
