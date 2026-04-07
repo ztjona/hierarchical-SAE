@@ -461,24 +461,33 @@ def DQN_training_step(
     # Initialize with zeros (terminal states have V=0 by definition)
     next_state_values = torch.zeros(exp_batch.shape, device=exp_batch["reward"].device)
 
-    # Compute V(s') = max_a Q(s', a) for non-terminal next states
+    # Compute V(s') for non-terminal next states
+    # NOTE: next_state is the OPPONENT's state (adversarial self-play).
+    # In zero-sum games, the opponent's best value is our worst:
+    #   Q(s_t) = r_t - γ * max_a' Q(s_{t+1}, a')
+    # The sign flip is applied below when computing expected_state_action_values.
     with torch.no_grad():
         _next_state_pos, _next_state_piece = target_net(
             exp_batch["next_state_board"][non_terminal_mask],
             exp_batch["next_state_piece"][non_terminal_mask],
         )
         if LOSS_APPROACH == "combined_avg":
-            # Combine using average (joint action value)
-            _next_val = (_next_state_pos + _next_state_piece) / 2
+            # Place and select are INDEPENDENT action spaces (position vs piece).
+            # Take max over each independently, then average.
+            _next_val = (
+                _next_state_pos.max(dim=1).values
+                + _next_state_piece.max(dim=1).values
+            ) / 2
         elif LOSS_APPROACH == "only_select":
-            _next_val = _next_state_piece
+            _next_val = _next_state_piece.max(dim=1).values
         elif LOSS_APPROACH == "only_place":
-            _next_val = _next_state_pos
+            _next_val = _next_state_pos.max(dim=1).values
 
-        # Take maximum Q-value across all possible actions
-        next_state_values[non_terminal_mask] = _next_val.max(dim=1).values
+        next_state_values[non_terminal_mask] = _next_val
 
-    # Compute target Q-values using Bellman equation: Q(s,a) = R + γ*max_a'Q(s',a')
-    expected_state_action_values = (next_state_values * GAMMA) + exp_batch["reward"]
+    # Bellman equation for adversarial self-play (zero-sum):
+    #   Q(s,a) = R - γ * max_a' Q(s', a')
+    # Minus because next_state is the opponent's turn — their gain is our loss.
+    expected_state_action_values = exp_batch["reward"] - (next_state_values * GAMMA)
 
     return state_action_values, expected_state_action_values
