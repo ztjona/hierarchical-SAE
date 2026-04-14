@@ -53,7 +53,7 @@ BATCH_SIZE = 32
 mode_2x2 = True
 
 # every epoch experience is generated with a new bot instance, models are saved at the end of each epoch
-EPOCHS = 10_000
+EPOCHS = 5_000
 
 # number of last states to consider in the experience generation at the beginning of training
 N_LAST_STATES_INIT = 3  # One more than Aa_replay(2) to test Q_select learning
