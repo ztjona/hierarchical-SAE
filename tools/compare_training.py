@@ -34,7 +34,10 @@ from tqdm import tqdm
 # EXPERIMENT_NAME = "Ab_data"
 # PARAM_NAME = "N_LAST_STATES_INIT"
 # EXPERIMENT_NAME = "Ac_fine"
-EXPERIMENT_NAME = "Ad_states_endgame"
+# EXPERIMENT_NAME = "Ad_states_endgame"
+# PARAM_NAME = "N_LAST_STATES_INIT"
+# Before fixing replay buffer bug, results are invalid:
+EXPERIMENT_NAME = "FA_Bellman"
 PARAM_NAME = "N_LAST_STATES_INIT"
 
 # BASELINEs: Include specific runs from previous experiments as reference points

@@ -44,9 +44,13 @@ from datetime import datetime
 # EXPERIMENT_NAME = "Ad_endgame"
 # PARAM_ITERATE = "ENDGAME_FRACTION"
 # PARAMS = [0.25, 0.5, 0.75]
-EXPERIMENT_NAME = "Ad_states_endgame"
+# EXPERIMENT_NAME = "Ad_states_endgame"
+# PARAM_ITERATE = "N_LAST_STATES_INIT"
+# PARAMS = [3, 4, 5]
+
+EXPERIMENT_NAME = "FA_Bellman"
 PARAM_ITERATE = "N_LAST_STATES_INIT"
-PARAMS = [3, 4, 5]
+PARAMS = [2, 3, 4, 5, 8, 12, 16]
 
 # Path to the original training script
 TRAIN_SCRIPT = "trainRL.py"
