@@ -352,13 +352,23 @@ def DQN_training_step(
     exp_batch : TensorDict
         Batch of experiences with state, action, reward, next_state, done
     LOSS_APPROACH : str
-        Approach for computing state-action values. Options are "combined_avg", "only_select", "only_place".
+        Approach for computing state-action values. Options are "combined_avg", "only_select", "only_place", "separate_bellman".
     Returns
     -------
-    state_action_values : torch.Tensor
-        Q-values for the actions taken in the batch
-    expected_state_action_values : torch.Tensor
-        Target Q-values computed using target network and Bellman equation
+    For "combined_avg", "only_select", "only_place":
+        state_action_values : torch.Tensor
+            Q-values for the actions taken in the batch
+        expected_state_action_values : torch.Tensor
+            Target Q-values computed using target network and Bellman equation
+    For "separate_bellman":
+        state_place_values : torch.Tensor
+            Q_place values for placement actions taken
+        expected_place : torch.Tensor
+            Bellman targets for placement head
+        state_select_values : torch.Tensor
+            Q_select values for selection actions taken
+        expected_select : torch.Tensor
+            Bellman targets for selection head
     """
     # Ensure networks are in correct mode
     policy_net.train()
@@ -444,39 +454,64 @@ def DQN_training_step(
         state_action_values = (
             state_place_action_values + state_sel_action_values
         ) * _factor
-        # state_action_values_2 = (
-        #     state_place_action_values + state_sel_action_values
-        # ) * 0.5
 
     elif LOSS_APPROACH == "only_select":
         # Use ONLY the selection action value for training
-        # This simplifies the learning task, as placement actions
         state_action_values = state_sel_action_values
     elif LOSS_APPROACH == "only_place":
         state_action_values = state_place_action_values
+    elif LOSS_APPROACH == "separate_bellman":
+        # Handled below — returns per-head values instead of a combined scalar
+        pass
     else:
         raise ValueError(f"Unknown LOSS_APPROACH {LOSS_APPROACH}")
 
     # Compute V(s_{t+1}) for all next states using target network
     # Initialize with zeros (terminal states have V=0 by definition)
-    next_state_values = torch.zeros(exp_batch.shape, device=exp_batch["reward"].device)
-
-    # Compute V(s') for non-terminal next states
-    # NOTE: next_state is the OPPONENT's state (adversarial self-play).
-    # In zero-sum games, the opponent's best value is our worst:
-    #   Q(s_t) = r_t - γ * max_a' Q(s_{t+1}, a')
-    # The sign flip is applied below when computing expected_state_action_values.
     with torch.no_grad():
         _next_state_pos, _next_state_piece = target_net(
             exp_batch["next_state_board"][non_terminal_mask],
             exp_batch["next_state_piece"][non_terminal_mask],
         )
+
+    if LOSS_APPROACH == "separate_bellman":
+        # Separate Bellman targets per head: each head gets its own gradient
+        # independently, preventing the lazy head problem.
+        #   loss = (loss_place + loss_select) / 2
+        # where:
+        #   loss_place = SmoothL1(Q_place[a], R + γ * max_a' Q_place(s'))
+        #   loss_select = SmoothL1(Q_select[a], R + γ * max_a' Q_select(s'))
+        next_place_values = torch.zeros(
+            exp_batch.shape, device=exp_batch["reward"].device
+        )
+        next_select_values = torch.zeros(
+            exp_batch.shape, device=exp_batch["reward"].device
+        )
+
+        with torch.no_grad():
+            next_place_values[non_terminal_mask] = _next_state_pos.max(dim=1).values
+            next_select_values[non_terminal_mask] = _next_state_piece.max(dim=1).values
+
+        reward = exp_batch["reward"]
+        expected_place = reward + (next_place_values * GAMMA)
+        expected_select = reward + (next_select_values * GAMMA)
+
+        return (
+            state_place_action_values,
+            expected_place,
+            state_sel_action_values,
+            expected_select,
+        )
+
+    # --- Shared path for combined_avg, only_select, only_place ---
+    next_state_values = torch.zeros(exp_batch.shape, device=exp_batch["reward"].device)
+
+    with torch.no_grad():
         if LOSS_APPROACH == "combined_avg":
             # Place and select are INDEPENDENT action spaces (position vs piece).
             # Take max over each independently, then average.
             _next_val = (
-                _next_state_pos.max(dim=1).values
-                + _next_state_piece.max(dim=1).values
+                _next_state_pos.max(dim=1).values + _next_state_piece.max(dim=1).values
             ) / 2
         elif LOSS_APPROACH == "only_select":
             _next_val = _next_state_piece.max(dim=1).values
@@ -485,9 +520,9 @@ def DQN_training_step(
 
         next_state_values[non_terminal_mask] = _next_val
 
-    # Bellman equation for adversarial self-play (zero-sum):
-    #   Q(s,a) = R - γ * max_a' Q(s', a')
-    # Minus because next_state is the opponent's turn — their gain is our loss.
-    expected_state_action_values = exp_batch["reward"] - (next_state_values * GAMMA)
+    # Bellman equation: Q(s,a) = R + γ * max_a' Q(s', a')
+    # NOTE: The adversarial sign is already encoded in the "propagate" rewards
+    # (P1 gets +R, P2 gets -R). No additional sign flip needed here.
+    expected_state_action_values = exp_batch["reward"] + (next_state_values * GAMMA)
 
     return state_action_values, expected_state_action_values

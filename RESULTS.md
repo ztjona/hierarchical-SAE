@@ -99,17 +99,73 @@ Reference runs (B02replicate, B03_verLR, Aa_replay) with N=2 reached 0.06-0.18 l
 
 ---
 
+## FA_Bellman — Adversarial Sign Flip Experiment (FAILED)
+
+**Question:** Does fixing the Bellman equation to account for adversarial self-play (`r - γV` instead of `r + γV`) improve learning across different N_LAST_STATES?
+
+**Commit:** `51b59ba` made two changes to `DQN_training_step`:
+1. **Independent max per head** (combined_avg): changed `max((pos + piece) / 2)` → `(max(pos) + max(piece)) / 2`
+2. **Adversarial sign flip**: changed `r + γ * max Q(s')` → `r - γ * max Q(s')`
+
+| Run | N_LAST_STATES_INIT |
+|-----|---------------------|
+| FA_Bellman(1) | 2 |
+| FA_Bellman(2) | 3 |
+| FA_Bellman(3) | 4 |
+| FA_Bellman(4) | 5 |
+| FA_Bellman(5) | 8 |
+| FA_Bellman(6) | 12 |
+| FA_Bellman(7) | 16 |
+
+**Fixed:** `STARTING_NET=None`, `EPOCHS=5000`, `NUM_EPOCHs_BUFFER=8`, `LR=7e-4`, `TAU=0.01`, `REWARD_FUNCTION="propagate"`, `LOSS_APPROACH="combined_avg"`.
+
+**Result:** N=2 performed similarly to previous baselines (~65% WR vs bot_loss-BT, ~80% vs bot_random). All N≥3 progressively worsened — same pattern as Ab_data. Loss scales with N (0.08 at N=2 → 0.48 at N=16).
+
+### Post-mortem: Sign flip was wrong
+
+**Change 1 (independent max) was correct.** Position and piece are independent action spaces; taking max over the averaged logits is mathematically wrong.
+
+**Change 2 (sign flip) was incorrect** given `REWARD_FUNCTION="propagate"`. The "propagate" reward scheme **already encodes the adversarial sign**:
+
+```python
+# R=+1 for P1 win, R_2=-R=-1 for P2
+reward = [R if i % 2 == 0 else R_2 for i in range(num_states)]
+```
+
+P1 states get `+R`, P2 states get `-R`. Adding a second sign flip in the Bellman equation **double-negates**, causing Q-values to diverge.
+
+**Proof** (P1 wins, R=1, γ=0.99):
+
+| State | Original `r + γV` | With sign flip `r − γV` |
+|-------|-------------------|------------------------|
+| T (terminal) | +1 | +1 |
+| T−1 (opponent) | −1 + 0.99(1) = **−0.01** | −1 − 0.99(1) = **−1.99** |
+| T−2 (player) | +1 + 0.99(−0.01) = **+0.99** | +1 − 0.99(−1.99) = **+2.97** |
+| T−3 (opponent) | −1 + 0.99(0.99) = **−0.02** | −1 − 0.99(2.97) = **−3.94** |
+
+Original: Q-values stay bounded ≈ ±1. Sign-flipped: Q-values diverge as ≈ R/(1−γ) = ±100.
+
+This explains why N=2 still worked (only 2 Bellman steps, limited divergence) while N≥3 failed increasingly.
+
+**Fix applied:** Reverted sign flip back to `r + γV`, kept the correct independent max fix. Re-running FA_Bellman to validate.
+
+---
+
 ## Key Takeaways
 
 1. **End-game training works well** (Aa_replay): N=2, buffer=8 → 65% WR, loss 0.06
 2. **Full-game from scratch fails** (Ab_data): N≥8 → loss stuck at 0.43+, no learning
 3. **Fine-tuning with curriculum fails** (Ac_fine, Ac_fineShallow): catastrophic forgetting of end-game knowledge as new states enter the buffer
 4. **Root cause identified:** the replay buffer evicts end-game experience as curriculum expands, destroying the Q-value anchor for Bellman targets
+5. **Adversarial sign flip is wrong with propagated rewards** (FA_Bellman): double-negation causes Q-value divergence proportional to chain length. The "propagate" reward function already handles adversarial perspective.
 
-## Next Experiment: Ad_states_endgame
+## Next Experiment: FA_Bellman (re-run)
 
+**Hypothesis:** With the independent max fix (correct) and sign flip reverted (was wrong), training with N>2 should match or improve over the original Ab_data results, since the independent max is a genuine improvement.
 
-## Next Experiment: Ad_endgame
+**Sweep:** `N_LAST_STATES_INIT` ∈ {2, 3, 4, 5, 8, 12, 16}
+
+## Pending: Ad_endgame
 
 **Hypothesis:** Maintaining a separate endgame replay buffer (N=2 experience) alongside the curriculum buffer will prevent catastrophic forgetting.
 

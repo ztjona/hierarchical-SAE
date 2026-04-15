@@ -38,7 +38,7 @@ EXPERIMENT_NAME = "Ad_states_endgame"
 CHECKPOINT_FOLDER = f"./CHECKPOINTS/{EXPERIMENT_NAME}/"
 # ARCHITECTURE = QuartoCNN
 ARCHITECTURE = QuartoCNN_uncoupled
-LOSS_APPROACH = "combined_avg"  # Options: "combined_avg", "only_select", "only_place"
+LOSS_APPROACH = "separate_bellman"  # Options: "combined_avg", "only_select", "only_place", "separate_bellman"
 REWARD_FUNCTION = "propagate"  # "final", "propagate", "discount"
 
 # if True, experience is generated at the beginning of each epoch
@@ -329,14 +329,22 @@ for e in tqdm(
             break
         step_i += 1
         # ---- TRAINING STEP ----
-        state_action_values, expected_state_action_values = DQN_training_step(
+        dqn_result = DQN_training_step(
             policy_net=policy_net,
             target_net=target_net,
             exp_batch=exp_batch,
             GAMMA=GAMMA,
             LOSS_APPROACH=LOSS_APPROACH,
         )
-        loss = loss_fcn(state_action_values, expected_state_action_values)
+        if LOSS_APPROACH == "separate_bellman":
+            # Separate Bellman: average of independent per-head losses
+            q_place, target_place, q_select, target_select = dqn_result
+            loss = (
+                loss_fcn(q_place, target_place) + loss_fcn(q_select, target_select)
+            ) / 2
+        else:
+            state_action_values, expected_state_action_values = dqn_result
+            loss = loss_fcn(state_action_values, expected_state_action_values)
         loss_data["loss_values"].append(loss.item())
 
         # Optimize the model
