@@ -1,9 +1,9 @@
 .vscode/
 logs/**.log
-train_scripts/**.py
-train_scripts/legacy/**.py
+# train_scripts/**.py
+# train_scripts/legacy/**.py
 
-*pkl
+# *pkl
 # images
 *.svg
 
