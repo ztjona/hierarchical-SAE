@@ -496,6 +496,14 @@ def DQN_training_step(
         expected_place = reward + (next_place_values * GAMMA)
         expected_select = reward + (next_select_values * GAMMA)
 
+        # Mask invalid actions: set target = prediction so loss contribution is zero.
+        # First moves have no placement (action_place=-1) → Q_place_pred is 0 → set target to 0.
+        # Terminal states have no selection (action_sel=-1) → Q_select_pred is 0 → set target to 0.
+        # Without this, terminal states produce SmoothL1(0, ±1) every epoch,
+        # pushing Q_select into tanh saturation.
+        expected_place[first_move_mask] = 0.0
+        expected_select[final_move_mask] = 0.0
+
         return (
             state_place_action_values,
             expected_place,

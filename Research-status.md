@@ -1,4 +1,20 @@
-# Quarto RL — Experiment Results (A-Series)
+# Quarto RL — Experiment Results
+
+## Experiment Naming Convention
+
+Experiments use a two-part name: **`XY_description`**
+
+- **First letter (X)** — Code version / significant algorithm change:
+  - `A`–`E`: early iterations (combined_avg baseline)
+  - `F`: adversarial sign flip in Bellman (FA_Bellman — failed, reverted)
+  - `G`: separate_bellman loss approach (GA_Bellman)
+  - `H`: separate_bellman + terminal state masking (HA_mask)
+- **Second letter (Y)** — Hyperparameter sweep within the same code version:
+  - `a`, `b`, `c`, ... for successive sweeps (e.g., Aa_replay, Ab_data, Ac_fine)
+
+Runs within a sweep are numbered: `HA_mask(1)0416_N_LAST_STATES_INIT_2`, where `(1)` is the run index, `0416` is the date (MMDD), and the suffix is the swept parameter value.
+
+---
 
 ## Overview
 
@@ -206,15 +222,42 @@ This explains why N=2 still worked (only 2 Bellman steps, limited divergence) wh
 
 4. **The experience tuple couples two different decision types.** Place and select are fundamentally different transitions with different temporal horizons, but they share one reward signal.
 
-**Candidate fixes (not yet tested):**
+**Candidate fixes:**
 
-| Fix | Description | Effort |
-|-----|-------------|--------|
-| **Mask terminal states from Q_select loss** | Exclude states where `action_sel=-1` from Q_select loss computation. Similarly mask first-move from Q_place loss. | Low |
-| **Remove tanh from Q_select** | Use unbounded Q-values (standard DQN) or clamp. Prevents gradient vanishing at ±1 boundary. | Low |
-| **Decouple transitions** | Restructure experience: separate (state, place_action, reward_place, next_state) and (state, select_action, reward_select, next_state) tuples with independent Bellman equations. | High |
-| **Monte Carlo returns for Q_select** | Use actual game outcome as Q_select target instead of bootstrapping through the noisy Q_select head. | Medium |
-| **Asymmetric learning rates** | Higher LR or more gradient steps for Q_select to compensate for weaker signal. | Low |
+| Fix | Description | Effort | Status |
+|-----|-------------|--------|--------|
+| **Mask terminal states from Q_select loss** | Exclude states where `action_sel=-1` from Q_select loss. Similarly mask first-move from Q_place loss. | Low | **HA_mask** (in progress) |
+| **Remove tanh from Q_select** | Use unbounded Q-values (standard DQN) or clamp. Prevents gradient vanishing at ±1 boundary. | Low | Pending |
+| **Decouple transitions** | Restructure experience: separate place and select transitions with independent Bellman equations. | High | Pending |
+| **Monte Carlo returns for Q_select** | Use actual game outcome as Q_select target instead of bootstrapping through the noisy Q_select head. | Medium | Pending |
+| **Asymmetric learning rates** | Higher LR or more gradient steps for Q_select to compensate for weaker signal. | Low | Pending |
+
+---
+
+## HA_mask — Terminal State Masking (N_LAST_STATES sweep)
+
+**Question:** Does masking invalid actions from per-head loss fix Q_select saturation and enable learning from deeper game states?
+
+**Code change:** In `DQN_training_step`, for `separate_bellman` mode, set Bellman target = prediction (0) for masked entries so they contribute zero loss:
+- `expected_place[first_move_mask] = 0.0` (no placement on first move)
+- `expected_select[final_move_mask] = 0.0` (no selection on terminal states)
+
+This eliminates the persistent `SmoothL1(0, ±1)` signal that was pushing Q_select into tanh saturation.
+
+| Run | N_LAST_STATES_INIT |
+|-----|---------------------|
+| HA_mask(1) | 2 |
+| HA_mask(2) | 3 |
+| HA_mask(3) | 4 |
+| HA_mask(4) | 6 |
+| HA_mask(5) | 10 |
+| HA_mask(6) | 16 |
+
+**Fixed:** `STARTING_NET=None`, `EPOCHS=5000`, `NUM_EPOCHs_BUFFER=8`, `LR=7e-4`, `TAU=0.01`, `REWARD_FUNCTION="propagate"`, `LOSS_APPROACH="separate_bellman"`.
+
+**Expected outcome:** Q_select should produce a distribution of values instead of collapsing to -1. N=2 should match or beat Aa_replay(2) baseline (65% WR). N=3–4 should improve over GA_Bellman equivalents.
+
+**Result:** *(pending)*
 
 ---
 

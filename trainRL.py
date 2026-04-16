@@ -34,7 +34,7 @@ logger.info("Imports done.")
 
 # STARTING_NET = "CHECKPOINTS\\Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8\\20260227_1103-Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8_E_5000.pt"
 STARTING_NET = None  # Set to None to start with random weights
-EXPERIMENT_NAME = "Ad_states_endgame"
+EXPERIMENT_NAME = "HA_mask"
 CHECKPOINT_FOLDER = f"./CHECKPOINTS/{EXPERIMENT_NAME}/"
 # ARCHITECTURE = QuartoCNN
 ARCHITECTURE = QuartoCNN_uncoupled
@@ -56,9 +56,9 @@ mode_2x2 = True
 EPOCHS = 5_000
 
 # number of last states to consider in the experience generation at the beginning of training
-N_LAST_STATES_INIT = 3  # One more than Aa_replay(2) to test Q_select learning
+N_LAST_STATES_INIT = 2  # Sweep variable for HA_mask
 # number of last states to consider in the experience generation at the end of training. -1 means all states
-N_LAST_STATES_FINAL = N_LAST_STATES_INIT  # No curriculum, constant N=3
+N_LAST_STATES_FINAL = N_LAST_STATES_INIT  # No curriculum, constant
 
 MATCHES_PER_EPOCH = 32  # number self-play matches per epoch
 NUM_EPOCHs_BUFFER = 8  # number of epochs to keep in the replay buffer, if GEN_EXPERIENCE_BY_EPOCH is True. If False, this parameter is ignored and only the experience of the first epoch is kept in the buffer.
