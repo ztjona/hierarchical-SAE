@@ -37,7 +37,7 @@ from tqdm import tqdm
 # EXPERIMENT_NAME = "Ad_states_endgame"
 # PARAM_NAME = "N_LAST_STATES_INIT"
 # Before fixing replay buffer bug, results are invalid:
-EXPERIMENT_NAME = "FA_Bellman"
+EXPERIMENT_NAME = "GA_Bellman"
 PARAM_NAME = "N_LAST_STATES_INIT"
 
 # BASELINEs: Include specific runs from previous experiments as reference points
@@ -145,6 +145,22 @@ def extract_param_value(folder_name):
     return None
 
 
+def extract_param_name_from_folder(folder_name):
+    """Extract the actual parameter name from a folder name.
+
+    Pattern: ExpName(idx)MMDD_PARAM_NAME_VALUE
+    Examples:
+      B02replicate(6)0121_LR_0.0005 -> LR
+      Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8 -> NUM_EPOCHs_BUFFER
+      Ab_data(4)0302_N_LAST_STATES_INIT_8 -> N_LAST_STATES_INIT
+    """
+    # Strip the trailing numeric value, then extract param name after the date
+    match = re.match(r".*?\)\d{4}_(.+)_[0-9.e-]+$", folder_name, re.IGNORECASE)
+    if match:
+        return match.group(1)
+    return None
+
+
 def extract_trailing_numeric_value(folder_name):
     """Extract the trailing numeric token from a folder name.
 
@@ -241,11 +257,13 @@ def load_baseline_experiments(base_path, baselines):
                     if param_value is not None and numeric_value_matches(
                         param_value, param_values
                     ):
+                        real_param_name = extract_param_name_from_folder(folder.name)
                         baseline_folders.append(
                             {
                                 "path": folder,
                                 "name": folder.name,
                                 "param_value": param_value,
+                                "param_name": real_param_name or PARAM_NAME,
                                 "experiment": exp_name,
                                 "is_baseline": True,
                             }
@@ -273,6 +291,27 @@ def load_experiment_data(folder_info):
         with open(pkl_path, "rb") as f:
             data = pickle.load(f)
         return data
+    except Exception:
+        pass
+
+    # Fallback: file was pickle.dump'd with CUDA tensors.
+    # torch.load's map_location only works for torch.save'd files.
+    # We need a custom Unpickler to remap CUDA storages to CPU.
+    try:
+        import io
+        import torch
+
+        class _CpuUnpickler(pickle.Unpickler):
+            def find_class(self, module, name):
+                if module == "torch.storage" and name == "_load_from_bytes":
+                    return lambda b: torch.load(
+                        io.BytesIO(b), map_location="cpu", weights_only=False
+                    )
+                return super().find_class(module, name)
+
+        with open(pkl_path, "rb") as f:
+            data = _CpuUnpickler(f).load()
+        return data
     except Exception as e:
         print(f"Error loading {pkl_path}: {e}")
         return None
@@ -290,8 +329,8 @@ def plot_losses(all_data, folders):
         if data is None:
             continue
 
-        loss_values = data["loss_values"]["loss_values"]
-        epoch_boundaries = data["loss_values"].get("epoch_values", [])
+        loss_values = to_numpy(data["loss_values"]["loss_values"])
+        epoch_boundaries = to_numpy(data["loss_values"].get("epoch_values", []))
         param_value = folder_info["param_value"]
         is_baseline = folder_info.get("is_baseline", False)
         exp_name = folder_info.get("experiment", "")
@@ -318,6 +357,7 @@ def plot_losses(all_data, folders):
         opacity = 0.6 if is_baseline else 0.8
         width = 2.0 if is_baseline else 2.5
         name_prefix = f"[{exp_name}] " if is_baseline else ""
+        label_param = folder_info.get("param_name", PARAM_NAME)
         param_str = format_param_value(param_value)
 
         fig.add_trace(
@@ -325,10 +365,10 @@ def plot_losses(all_data, folders):
                 x=x_values,
                 y=smoothed,
                 mode="lines",
-                name=f"{name_prefix}{PARAM_NAME}={param_str}",
+                name=f"{name_prefix}{label_param}={param_str}",
                 line=dict(color=colors[idx], width=width, dash=line_style),
                 opacity=opacity,
-                hovertemplate=f"<b>{name_prefix}{PARAM_NAME}={param_str}</b><br>Epoch: %{{x}}<br>Loss: %{{y:.4f}}<extra></extra>",
+                hovertemplate=f"<b>{name_prefix}{label_param}={param_str}</b><br>Epoch: %{{x}}<br>Loss: %{{y:.4f}}<extra></extra>",
             )
         )
 
@@ -388,11 +428,12 @@ def plot_win_rates(all_data, folders):
         opacity = 0.6 if is_baseline else 0.8
         width = 2.0 if is_baseline else 2.5
         name_prefix = f"[{exp_name}] " if is_baseline else ""
+        label_param = folder_info.get("param_name", PARAM_NAME)
         param_str = format_param_value(param_value)
 
         for rival_idx, rival_name in enumerate(rival_names):
             if rival_name in win_rate_data:
-                win_rates = win_rate_data[rival_name]
+                win_rates = to_numpy(win_rate_data[rival_name])
 
                 # Apply smoothing to win rates
                 if len(win_rates) > smoothing_window:
@@ -411,10 +452,10 @@ def plot_win_rates(all_data, folders):
                         x=epochs,
                         y=smoothed_wr,
                         mode="lines",
-                        name=f"{name_prefix}{PARAM_NAME}={param_str}",
+                        name=f"{name_prefix}{label_param}={param_str}",
                         line=dict(color=colors[idx], width=width, dash=line_style),
                         opacity=opacity,
-                        hovertemplate=f"<b>{name_prefix}{PARAM_NAME}={param_str}</b><br>Epoch: %{{x}}<br>Win Rate: %{{y:.2%}}<extra></extra>",
+                        hovertemplate=f"<b>{name_prefix}{label_param}={param_str}</b><br>Epoch: %{{x}}<br>Win Rate: %{{y:.2%}}<extra></extra>",
                         showlegend=(rival_idx == 0),  # Only show legend once
                     ),
                     row=1,

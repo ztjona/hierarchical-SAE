@@ -106,6 +106,18 @@ def main():
     full_name = path.basename(pkl_path).replace(".pkl", "")
     folder = path.dirname(pkl_path)
 
+    # Save plots in results/<experiment_name>/
+    # Extract base experiment name (before the variation number)
+    import re
+
+    base_match = re.match(r"^(.+?)\(\d+\)", full_name)
+    base_exp = base_match.group(1) if base_match else full_name
+    results_dir = path.join(path.dirname(__file__), "..", "results", base_exp)
+    if not path.exists(results_dir):
+        import os
+
+        os.makedirs(results_dir, exist_ok=True)
+
     qh = data["q_values_history"]
     loss_data = data["loss_values"]
     win_rate = data["win_rate"]
@@ -128,6 +140,10 @@ def main():
             DISPLAY_PLOT=True,
             PLOT_TYPE="hist",
             experiment_name=full_name,
+            FREQ_EPOCH_SAVING=1,
+            FOLDER_SAVE=results_dir,
+            FIG_NAME=lambda epoch: f"{full_name}_qv.svg",
+            current_epoch=1,
         )
 
     if show_plots in ("all", "wr"):
@@ -135,6 +151,9 @@ def main():
             *win_rate.items(),
             DISPLAY_PLOT=True,
             experiment_name=full_name,
+            FREQ_EPOCH_SAVING=1,
+            FOLDER_SAVE=results_dir,
+            FIG_NAME=lambda epoch: f"{full_name}_win_rate.svg",
         )
 
     if show_plots in ("all", "loss"):
@@ -142,6 +161,9 @@ def main():
             loss_data,
             DISPLAY_PLOT=True,
             experiment_name=full_name,
+            FREQ_EPOCH_SAVING=1,
+            FOLDER_SAVE=results_dir,
+            FIG_NAME=lambda epoch: f"{full_name}_loss.svg",
         )
 
     plt.show(block=True)

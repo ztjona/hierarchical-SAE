@@ -380,11 +380,18 @@ for e in tqdm(
     # Evaluate Q-values for the experience batch
     q_place, q_select = p1.evaluate(exp)
 
-    q_values_history["q_place"].append(q_place)
-    q_values_history["q_select"].append(q_select)
+    q_values_history["q_place"].append(
+        q_place.detach().cpu().tolist() if hasattr(q_place, "detach") else q_place
+    )
+    q_values_history["q_select"].append(
+        q_select.detach().cpu().tolist() if hasattr(q_select, "detach") else q_select
+    )
     # Save rewards (only once, they're the same across epochs for the same exp batch)
     if len(q_values_history["rewards"]) == 0:
-        q_values_history["rewards"].append(exp["reward"])
+        reward = exp["reward"]
+        q_values_history["rewards"].append(
+            reward.detach().cpu().tolist() if hasattr(reward, "detach") else reward
+        )
 
     loss_data["epoch_values"].append(step_i)
 
