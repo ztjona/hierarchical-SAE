@@ -115,7 +115,7 @@ GAMMA = 0.99
 # The bot at the end of each epoch will be evaluated against a limited number of rivals known as BASELINES.
 BASELINES = [
     {
-        "path": "CHECKPOINTS\\LOSS_APPROACHs_1212-2_only_select\\20251212_2206-LOSS_APPROACHs_1212-2_only_select_E_1034.pt",
+        "path": "CHECKPOINTS//LOSS_APPROACHs_1212-2_only_select//20251212_2206-LOSS_APPROACHs_1212-2_only_select_E_1034.pt",
         "name": "bot_loss-BT",
         "bot": Quarto_bot,
         "params": {
