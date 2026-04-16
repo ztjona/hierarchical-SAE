@@ -151,6 +151,36 @@ This explains why N=2 still worked (only 2 Bellman steps, limited divergence) wh
 
 ---
 
+---
+
+## GA_Bellman — Separate Bellman Loss (N_LAST_STATES sweep)
+
+**Question:** Does training each head with its own independent Bellman target solve the "lazy Q_select head" problem observed across all prior experiments?
+
+**Commit:** `9edad2f` introduced `LOSS_APPROACH="separate_bellman"` in `DQN_training_step`.
+
+| Run | N_LAST_STATES_INIT |
+|-----|---------------------|
+| GA_Bellman(1) | 2 |
+| GA_Bellman(2) | 3 |
+| GA_Bellman(3) | 6 |
+| GA_Bellman(4) | 12 |
+| GA_Bellman(5) | 16 |
+
+**Fixed:** `STARTING_NET=None`, `EPOCHS=5000`, `NUM_EPOCHs_BUFFER=8`, `LR=7e-4`, `TAU=0.01`, `REWARD_FUNCTION="propagate"`, `LOSS_APPROACH="separate_bellman"`.
+
+**Result:** Worse than `combined_avg` baselines. Best run (N=2) reached ~70% WR vs bot_loss-BT and ~85% vs bot_random but with higher loss (~0.10 vs 0.06). N≥3 degraded progressively (same pattern as Ab_data). Q_select still saturates at -1 — the separate loss did not fix the fundamental problem.
+
+**Why it failed:** The separate Bellman approach actually _amplifies_ the Q_select saturation problem:
+
+1. **Terminal state poison:** At terminal states, `action_sel=-1` so `state_sel_action_values = 0` (never set). But `expected_select = reward` (±1). This creates a persistent `SmoothL1(0, ±1)` loss every single epoch — a constant force pushing Q_select outputs toward tanh boundaries.
+
+2. **Tanh gradient vanishing:** The network uses `tanh` activation, so targets at ±1 push logits toward ±∞ where `tanh'(x) ≈ 0`. The head loses ability to learn once saturated.
+
+3. **No gradient masking:** In `combined_avg`, Q_select is implicitly shielded at terminal states (averaged with Q_place which dominates). With `separate_bellman`, Q_select gets the full unmasked ±1 target directly.
+
+---
+
 ## Key Takeaways
 
 1. **End-game training works well** (Aa_replay): N=2, buffer=8 → 65% WR, loss 0.06
@@ -158,12 +188,35 @@ This explains why N=2 still worked (only 2 Bellman steps, limited divergence) wh
 3. **Fine-tuning with curriculum fails** (Ac_fine, Ac_fineShallow): catastrophic forgetting of end-game knowledge as new states enter the buffer
 4. **Root cause identified:** the replay buffer evicts end-game experience as curriculum expands, destroying the Q-value anchor for Bellman targets
 5. **Adversarial sign flip is wrong with propagated rewards** (FA_Bellman): double-negation causes Q-value divergence proportional to chain length. The "propagate" reward function already handles adversarial perspective.
+6. **Q_select saturation at -1 is a persistent problem** across all experiments — the select head never learns meaningful Q-values.
 
-## Next Experiment: FA_Bellman (re-run)
+---
 
-**Hypothesis:** With the independent max fix (correct) and sign flip reverted (was wrong), training with N>2 should match or improve over the original Ab_data results, since the independent max is a genuine improvement.
+## Current Open Problem: Q_select Saturation
 
-**Sweep:** `N_LAST_STATES_INIT` ∈ {2, 3, 4, 5, 8, 12, 16}
+**Symptom:** Across ALL experiments (Aa, Ab, FA, GA), the Q_select head saturates at -1 and never produces useful Q-values. Only Q_place learns. The bot effectively selects pieces randomly.
+
+**Root causes identified:**
+
+1. **Terminal state training signal is destructive.** Terminal states have `action_sel=-1` (no selection happened), so `Q_select_pred = 0`. But the Bellman target is `reward = ±1`. This `SmoothL1(0, ±1)` loss occurs every epoch and pushes the tanh activation to saturation, killing gradients.
+
+2. **Temporal credit assignment asymmetry.** Placing a piece on a winning square gets immediate reward. Selecting a piece for the opponent has an effect 2+ turns later. The Bellman chain for Q_select is inherently longer and noisier.
+
+3. **Tanh at the boundary kills learning.** With "propagate" rewards always being ±1, targets land exactly at the tanh saturation boundaries. Once logits drift to ±3, `tanh'(x) ≈ 0` and the head can no longer learn.
+
+4. **The experience tuple couples two different decision types.** Place and select are fundamentally different transitions with different temporal horizons, but they share one reward signal.
+
+**Candidate fixes (not yet tested):**
+
+| Fix | Description | Effort |
+|-----|-------------|--------|
+| **Mask terminal states from Q_select loss** | Exclude states where `action_sel=-1` from Q_select loss computation. Similarly mask first-move from Q_place loss. | Low |
+| **Remove tanh from Q_select** | Use unbounded Q-values (standard DQN) or clamp. Prevents gradient vanishing at ±1 boundary. | Low |
+| **Decouple transitions** | Restructure experience: separate (state, place_action, reward_place, next_state) and (state, select_action, reward_select, next_state) tuples with independent Bellman equations. | High |
+| **Monte Carlo returns for Q_select** | Use actual game outcome as Q_select target instead of bootstrapping through the noisy Q_select head. | Medium |
+| **Asymmetric learning rates** | Higher LR or more gradient steps for Q_select to compensate for weaker signal. | Low |
+
+---
 
 ## Pending: Ad_endgame
 
