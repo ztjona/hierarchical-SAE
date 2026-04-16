@@ -153,10 +153,18 @@ def main():
     #     print(f"  - {file}")
 
     print(f"\n{'=' * 80}")
-    print("TO RUN TRAINING WITH LOGGING:")
+    print("TO RUN TRAINING (local, interactive):")
     print(f"{'=' * 80}")
     for command in run_commands:
         print(command)
+
+    print(f"\n{'=' * 80}")
+    print("TO RUN TRAINING (VPS via SSH, survives disconnect):")
+    print(f"{'=' * 80}")
+    for command in run_commands:
+        # nohup keeps the process alive after SSH disconnect
+        # >/dev/null 2>&1 suppresses nohup.out (runpy.sh already logs to logs/)
+        print(f"nohup {command} >/dev/null 2>&1" if not command.endswith("&") else f"nohup {command[:-2]} >/dev/null 2>&1 &")
 
     print(f"{'=' * 80}\n")
 
