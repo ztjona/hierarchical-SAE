@@ -160,9 +160,13 @@ def plot_Qv_progress(
     if not q_values_history or len(q_values_history.get("q_place", [])) == 0:
         return
 
-    # Extract Q-values
-    q_place_history = q_values_history.get("q_place", [])
-    q_select_history = q_values_history.get("q_select", [])
+    # Extract Q-values, normalizing to numpy arrays (values may have been stored as plain lists)
+    q_place_history = [
+        np.array(q) if isinstance(q, list) else q for q in q_values_history.get("q_place", [])
+    ]
+    q_select_history = [
+        np.array(q) if isinstance(q, list) else q for q in q_values_history.get("q_select", [])
+    ]
 
     # Use minimum size across all epochs to ensure all indices are valid
     # This handles cases where different epochs have different numbers of samples
@@ -315,7 +319,8 @@ def plot_Qv_progress(
             # Compute histograms for this reward group across epochs
             hist_data = []
             for q_epoch in q_history:
-                q_subset = q_epoch[indices].detach().cpu().numpy().flatten()
+                q_epoch_arr = q_epoch.detach().cpu().numpy() if hasattr(q_epoch, 'detach') else np.array(q_epoch)
+                q_subset = q_epoch_arr[indices].flatten()
                 hist, _ = np.histogram(q_subset, bins=HIST_BINS, range=HIST_RANGE)
                 # Normalize to percentage
                 hist_percent = (hist / hist.sum()) * 100 if hist.sum() > 0 else hist
