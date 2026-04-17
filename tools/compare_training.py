@@ -37,7 +37,10 @@ from tqdm import tqdm
 # EXPERIMENT_NAME = "Ad_states_endgame"
 # PARAM_NAME = "N_LAST_STATES_INIT"
 # Before fixing replay buffer bug, results are invalid:
-EXPERIMENT_NAME = "GA_Bellman"
+# EXPERIMENT_NAME = "GA_Bellman"
+# PARAM_NAME = "N_LAST_STATES_INIT"
+
+EXPERIMENT_NAME = "HA_mask"
 PARAM_NAME = "N_LAST_STATES_INIT"
 
 # BASELINEs: Include specific runs from previous experiments as reference points
@@ -548,15 +551,17 @@ def main():
     print("\nGenerating loss and win rate plots...")
 
     fig_loss = plot_losses(all_data, folders)
-    loss_png = results_dir / f"comparison_loss_{exp_filename}.png"
-    fig_loss.write_image(str(loss_png), width=1200, height=600, scale=2)
-    print("✓ Loss plot saved")
-
     fig_wr = plot_win_rates(all_data, folders)
+
+    # Save lightweight HTML files (CDN-hosted plotly.js keeps files small)
+    loss_path = results_dir / f"comparison_loss_{exp_filename}.html"
+    fig_loss.write_html(str(loss_path), include_plotlyjs="cdn")
+    print(f"✓ Loss plot saved ({loss_path})")
+
     if fig_wr is not None:
-        wr_png = results_dir / f"comparison_win_rate_{exp_filename}.png"
-        fig_wr.write_image(str(wr_png), width=1400, height=600, scale=2)
-        print("✓ Win rate plot saved")
+        wr_path = results_dir / f"comparison_win_rate_{exp_filename}.html"
+        fig_wr.write_html(str(wr_path), include_plotlyjs="cdn")
+        print(f"✓ Win rate plot saved ({wr_path})")
 
     print(f"\n✓ All plots saved to: {results_dir}/")
     print("\nOpening plots in browser...")

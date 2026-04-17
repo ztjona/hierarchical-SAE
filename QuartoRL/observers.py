@@ -168,6 +168,12 @@ def plot_Qv_progress(
         np.array(q) if isinstance(q, list) else q for q in q_values_history.get("q_select", [])
     ]
 
+    # Normalize rewards to numpy array (may be tensor, list, or array)
+    if isinstance(rewards, list):
+        rewards = np.array(rewards)
+    elif hasattr(rewards, "detach"):
+        rewards = rewards.detach().cpu().numpy()
+
     # Use minimum size across all epochs to ensure all indices are valid
     # This handles cases where different epochs have different numbers of samples
     if not q_place_history:
