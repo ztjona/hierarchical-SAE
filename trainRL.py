@@ -11,6 +11,7 @@ from torchrl.data.replay_buffers.samplers import SamplerWithoutReplacement
 from bot.CNN_bot import Quarto_bot
 from models.CNN1 import QuartoCNN
 from models.CNN_uncoupled import QuartoCNN as QuartoCNN_uncoupled
+from models.CNN_unbound import QuartoCNN as QuartoCNN_unbound
 from QuartoRL import (
     gen_experience,
     run_contest,
@@ -34,10 +35,10 @@ logger.info("Imports done.")
 
 # STARTING_NET = "CHECKPOINTS\\Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8\\20260227_1103-Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8_E_5000.pt"
 STARTING_NET = None  # Set to None to start with random weights
-EXPERIMENT_NAME = "HA_mask"
+EXPERIMENT_NAME = "IA_unbound"
 CHECKPOINT_FOLDER = f"./CHECKPOINTS/{EXPERIMENT_NAME}/"
 # ARCHITECTURE = QuartoCNN
-ARCHITECTURE = QuartoCNN_uncoupled
+ARCHITECTURE = QuartoCNN_unbound
 LOSS_APPROACH = "separate_bellman"  # Options: "combined_avg", "only_select", "only_place", "separate_bellman"
 REWARD_FUNCTION = "propagate"  # "final", "propagate", "discount"
 

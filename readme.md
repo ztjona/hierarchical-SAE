@@ -109,7 +109,8 @@ bot/                    # Bot wrappers
 
 models/                 # Neural network architectures
   NN_abstract.py        # Base class (export_model, load_model)
-  CNN_uncoupled.py      # QuartoCNN_uncoupled — current main architecture
+  CNN_unbound.py        # QuartoCNN_unbound — unbounded Q-values (no tanh), current
+  CNN_uncoupled.py      # QuartoCNN_uncoupled — tanh-bounded Q-values [-1,1]
   CNN1.py               # QuartoCNN — original (Q_select depends on Q_place)
   CNN_fdec.py           # Extended CNN architecture
   CNNfrancis.py         # Francis architecture variant

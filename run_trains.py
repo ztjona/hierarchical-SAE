@@ -48,7 +48,7 @@ from datetime import datetime
 # PARAM_ITERATE = "N_LAST_STATES_INIT"
 # PARAMS = [3, 4, 5]
 
-EXPERIMENT_NAME = "HA_mask"
+EXPERIMENT_NAME = "IA_unbound"
 PARAM_ITERATE = "N_LAST_STATES_INIT"
 PARAMS = [2, 3, 4, 6, 10, 16]
 
@@ -164,7 +164,11 @@ def main():
     for command in run_commands:
         # nohup keeps the process alive after SSH disconnect
         # >/dev/null 2>&1 suppresses nohup.out (runpy.sh already logs to logs/)
-        print(f"nohup {command} >/dev/null 2>&1" if not command.endswith("&") else f"nohup {command[:-2]} >/dev/null 2>&1 &")
+        print(
+            f"nohup {command} >/dev/null 2>&1"
+            if not command.endswith("&")
+            else f"nohup {command[:-2]} >/dev/null 2>&1 &"
+        )
 
     print(f"{'=' * 80}\n")
 

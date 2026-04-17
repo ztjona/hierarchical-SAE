@@ -9,6 +9,7 @@ Experiments use a two-part name: **`XY_description`**
   - `F`: adversarial sign flip in Bellman (FA_Bellman — failed, reverted)
   - `G`: separate_bellman loss approach (GA_Bellman)
   - `H`: separate_bellman + terminal state masking (HA_mask)
+  - `I`: unbounded Q-values — no tanh (IA_unbound)
 - **Second letter (Y)** — Hyperparameter sweep within the same code version:
   - `a`, `b`, `c`, ... for successive sweeps (e.g., Aa_replay, Ab_data, Ac_fine)
 
@@ -256,6 +257,34 @@ This eliminates the persistent `SmoothL1(0, ±1)` signal that was pushing Q_sele
 **Fixed:** `STARTING_NET=None`, `EPOCHS=5000`, `NUM_EPOCHs_BUFFER=8`, `LR=7e-4`, `TAU=0.01`, `REWARD_FUNCTION="propagate"`, `LOSS_APPROACH="separate_bellman"`.
 
 **Expected outcome:** Q_select should produce a distribution of values instead of collapsing to -1. N=2 should match or beat Aa_replay(2) baseline (65% WR). N=3–4 should improve over GA_Bellman equivalents.
+
+**Result (partial, 500 epochs due to bug):**
+- Loss improved vs GA_Bellman across all N (the mask removed the constant SmoothL1(0,±1) noise).
+- N=2: ~48% vs bot_loss-BT, ~72% vs bot_random — learning, but Q_select still at -1. Q_place carries all performance.
+- N=4: Some Q_select learning visible — best case among the sweep.
+- N≥6: Loss stuck at 0.35+, flat WR.
+- N=16: Both Q_place and Q_select saturate at +1 — tanh ceiling. Bellman targets `R + γ*max_Q` exceed [-1,1] range, pushing logits to ±∞.
+
+**Conclusion:** The mask fixed the terminal-state poison signal but exposed the deeper problem: **tanh output activation constrains Q-values to [-1,1], but Bellman targets naturally exceed that range.** Standard DQN uses unbounded Q-values. The N=2 Q_select issue is a broken bootstrap: Q_select at terminal states is masked (never trained), so the penultimate Q_select bootstraps from random/drifting target-net values.
+
+---
+
+## IA_unbound — Unbounded Q-values (N_LAST_STATES sweep)
+
+**Question:** Does removing tanh activation from both heads (unbounded Q-values, standard DQN practice) fix Q_select saturation and enable learning from deeper game states?
+
+**Code change:** New architecture `QuartoCNN_unbound` in `models/CNN_unbound.py` — identical to `QuartoCNN_uncoupled` but with raw linear outputs instead of tanh. Keeps the terminal state masking from HA_mask.
+
+| Run | N_LAST_STATES_INIT |
+|-----|---------------------|
+| IA_unbound(1) | 2 |
+| IA_unbound(2) | 3 |
+| IA_unbound(3) | 4 |
+| IA_unbound(4) | 6 |
+
+**Fixed:** `STARTING_NET=None`, `EPOCHS=5000`, `NUM_EPOCHs_BUFFER=8`, `LR=7e-4`, `TAU=0.01`, `REWARD_FUNCTION="propagate"`, `LOSS_APPROACH="separate_bellman"`, `ARCHITECTURE=QuartoCNN_unbound`.
+
+**Expected outcome:** Q-values can freely match Bellman targets without gradient vanishing. Q_select should finally show meaningful variation. May need gradient clipping attention since Q-values are unbounded.
 
 **Result:** *(pending)*
 
