@@ -12,6 +12,7 @@ Date: 2026
 
 import os
 import pickle
+import subprocess
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -39,8 +40,10 @@ from tqdm import tqdm
 # Before fixing replay buffer bug, results are invalid:
 # EXPERIMENT_NAME = "GA_Bellman"
 # PARAM_NAME = "N_LAST_STATES_INIT"
+# EXPERIMENT_NAME = "HA_mask"
+# PARAM_NAME = "N_LAST_STATES_INIT"
 
-EXPERIMENT_NAME = "HA_mask"
+EXPERIMENT_NAME = "IA_unbound"
 PARAM_NAME = "N_LAST_STATES_INIT"
 
 # BASELINEs: Include specific runs from previous experiments as reference points
@@ -80,6 +83,63 @@ def to_numpy(value):
         return np.array(value)
     else:
         return value
+
+
+def _find_chromium():
+    """Find a Chromium-based browser (Edge or Chrome) on Windows."""
+    for prog_var in ("PROGRAMFILES", "PROGRAMFILES(X86)"):
+        base = os.environ.get(prog_var, "")
+        if not base:
+            continue
+        for rel in (
+            os.path.join("Google", "Chrome", "Application", "chrome.exe"),
+            os.path.join("Microsoft", "Edge", "Application", "msedge.exe"),
+        ):
+            p = os.path.join(base, rel)
+            if os.path.isfile(p):
+                return p
+    return None
+
+
+def save_figure_png(fig, png_path, width=1200, height=600):
+    """Save plotly figure as PNG via temp HTML + headless browser screenshot."""
+    browser = _find_chromium()
+    if not browser:
+        html_path = Path(png_path).with_suffix(".html")
+        fig.write_html(str(html_path), include_plotlyjs="cdn")
+        print(f"\u26a0 No browser found. Saved HTML instead: {html_path}")
+        return
+
+    tmp_html = Path(png_path).with_suffix(".tmp.html")
+    try:
+        fig.write_html(str(tmp_html), include_plotlyjs=True, auto_open=False)
+        abs_png = str(Path(png_path).resolve())
+        abs_html = str(tmp_html.resolve())
+        subprocess.run(
+            [
+                browser,
+                "--headless",
+                "--disable-gpu",
+                "--no-sandbox",
+                "--no-first-run",
+                f"--screenshot={abs_png}",
+                f"--window-size={width},{height}",
+                "--force-device-scale-factor=2",
+                "--virtual-time-budget=10000",
+                abs_html,
+            ],
+            timeout=30,
+            capture_output=True,
+        )
+        if not Path(png_path).exists():
+            raise RuntimeError("Screenshot not created")
+    except Exception as e:
+        print(f"\u26a0 PNG export failed ({e}). Saving HTML instead.")
+        html_path = Path(png_path).with_suffix(".html")
+        fig.write_html(str(html_path), include_plotlyjs="cdn")
+    finally:
+        if tmp_html.exists():
+            tmp_html.unlink()
 
 
 def generate_rainbow_colors(n):
@@ -553,14 +613,14 @@ def main():
     fig_loss = plot_losses(all_data, folders)
     fig_wr = plot_win_rates(all_data, folders)
 
-    # Save lightweight HTML files (CDN-hosted plotly.js keeps files small)
-    loss_path = results_dir / f"comparison_loss_{exp_filename}.html"
-    fig_loss.write_html(str(loss_path), include_plotlyjs="cdn")
+    # Save as PNG via headless browser screenshot
+    loss_path = results_dir / f"comparison_loss_{exp_filename}.png"
+    save_figure_png(fig_loss, loss_path)
     print(f"✓ Loss plot saved ({loss_path})")
 
     if fig_wr is not None:
-        wr_path = results_dir / f"comparison_win_rate_{exp_filename}.html"
-        fig_wr.write_html(str(wr_path), include_plotlyjs="cdn")
+        wr_path = results_dir / f"comparison_win_rate_{exp_filename}.png"
+        save_figure_png(fig_wr, wr_path, width=1400)
         print(f"✓ Win rate plot saved ({wr_path})")
 
     print(f"\n✓ All plots saved to: {results_dir}/")
