@@ -35,12 +35,12 @@ logger.info("Imports done.")
 
 # STARTING_NET = "CHECKPOINTS\\Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8\\20260227_1103-Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8_E_5000.pt"
 STARTING_NET = None  # Set to None to start with random weights
-EXPERIMENT_NAME = "IA_unbound"
+EXPERIMENT_NAME = "JA_final"
 CHECKPOINT_FOLDER = f"./CHECKPOINTS/{EXPERIMENT_NAME}/"
 # ARCHITECTURE = QuartoCNN
-ARCHITECTURE = QuartoCNN_unbound
-LOSS_APPROACH = "separate_bellman"  # Options: "combined_avg", "only_select", "only_place", "separate_bellman"
-REWARD_FUNCTION = "propagate"  # "final", "propagate", "discount"
+ARCHITECTURE = QuartoCNN_uncoupled
+LOSS_APPROACH = "combined_avg"  # Options: "combined_avg", "only_select", "only_place", "separate_bellman"
+REWARD_FUNCTION = "final"  # "final", "propagate", "discount"
 
 # if True, experience is generated at the beginning of each epoch
 # if False, experience is generated only at the first epoch and reused for the rest of epochs
@@ -57,7 +57,7 @@ mode_2x2 = True
 EPOCHS = 5_000
 
 # number of last states to consider in the experience generation at the beginning of training
-N_LAST_STATES_INIT = 2  # Sweep variable for HA_mask
+N_LAST_STATES_INIT = 2  # Sweep variable for JA_final
 # number of last states to consider in the experience generation at the end of training. -1 means all states
 N_LAST_STATES_FINAL = N_LAST_STATES_INIT  # No curriculum, constant
 
@@ -333,18 +333,18 @@ for e in tqdm(
         dqn_result = DQN_training_step(
             policy_net=policy_net,
             target_net=target_net,
-            exp_batch=exp_batch,
+            exp_batch=exp_batch,  # type: ignore
             GAMMA=GAMMA,
             LOSS_APPROACH=LOSS_APPROACH,
         )
         if LOSS_APPROACH == "separate_bellman":
             # Separate Bellman: average of independent per-head losses
-            q_place, target_place, q_select, target_select = dqn_result
+            q_place, target_place, q_select, target_select = dqn_result  # type: ignore
             loss = (
                 loss_fcn(q_place, target_place) + loss_fcn(q_select, target_select)
             ) / 2
         else:
-            state_action_values, expected_state_action_values = dqn_result
+            state_action_values, expected_state_action_values = dqn_result  # type: ignore
             loss = loss_fcn(state_action_values, expected_state_action_values)
         loss_data["loss_values"].append(loss.item())
 
