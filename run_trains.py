@@ -48,9 +48,9 @@ from datetime import datetime
 # PARAM_ITERATE = "N_LAST_STATES_INIT"
 # PARAMS = [3, 4, 5]
 
-EXPERIMENT_NAME = "IA_unbound"
+EXPERIMENT_NAME = "JA_final"
 PARAM_ITERATE = "N_LAST_STATES_INIT"
-PARAMS = [2, 3, 4, 6, 10, 16]
+PARAMS = [2, 3, 4, 6, 12, 16]
 
 # Path to the original training script
 TRAIN_SCRIPT = "trainRL.py"

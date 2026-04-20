@@ -10,6 +10,7 @@ Experiments use a two-part name: **`XY_description`**
   - `G`: separate_bellman loss approach (GA_Bellman)
   - `H`: separate_bellman + terminal state masking (HA_mask)
   - `I`: unbounded Q-values — no tanh (IA_unbound)
+  - `J`: final-only rewards with standard bounded uncoupled DQN (JA_final)
 - **Second letter (Y)** — Hyperparameter sweep within the same code version:
   - `a`, `b`, `c`, ... for successive sweeps (e.g., Aa_replay, Ab_data, Ac_fine)
 
@@ -286,7 +287,72 @@ This eliminates the persistent `SmoothL1(0, ±1)` signal that was pushing Q_sele
 
 **Expected outcome:** Q-values can freely match Bellman targets without gradient vanishing. Q_select should finally show meaningful variation. May need gradient clipping attention since Q-values are unbounded.
 
+**Result:** Failed badly. `comparison_loss_IA_unbound.png` shows strong divergence, especially at `N=2`, and `comparison_win_rate_IA_unbound.png` stays near ~30% against both baselines.
+
+**Interpretation:** The tanh removal was implemented correctly in both theory and code, but it exposed a deeper instability in the learning target rather than solving the task.
+
+- The implementation is correct: `CNN_unbound.py` returns raw linear outputs from `fc2_board` and `fc2_piece`, so this is standard unbounded Q-learning behavior.
+- The failure is not evidence that an extra activation layer after `fc2_*` is needed. Adding another nonlinearity before a final linear layer would change optimization dynamics, but it would not fix the target-definition problem.
+- With `REWARD_FUNCTION="propagate"`, every state receives `R=±1`, so the Bellman targets remain noisy and can grow under repeated bootstrap/max overestimation.
+- More importantly, **Q_select still has no clean supervised anchor**. Q_place is grounded by terminal placement states; Q_select mostly bootstraps from itself.
+
+**Conclusion:** Tanh saturation was a real symptom, but not the main cause. The main issue is the reward / target design for the select branch.
+
+---
+
+## JA_final — Final-Only Reward with Combined DQN (N_LAST_STATES sweep)
+
+**Question:** Does switching from `propagate` to `final` rewards stabilize the Bellman targets and restore useful learning, while keeping the previously best-performing bounded uncoupled architecture?
+
+**Code change:** Revert to `QuartoCNN_uncoupled`, `LOSS_APPROACH="combined_avg"`, and use `REWARD_FUNCTION="final"`.
+
+Rationale:
+- `final` gives only the terminal transition a non-zero reward and lets value propagate through the Bellman chain naturally.
+- This avoids injecting `±1` into every state, which appears to destabilize both heads under longer horizons.
+- `combined_avg` is retained because it was the only regime that previously produced useful behavior at `N=2`, likely by letting Q_select benefit indirectly from Q_place learning.
+
+| Run | N_LAST_STATES_INIT |
+|-----|---------------------|
+| JA_final(1) | 2 |
+| JA_final(2) | 3 |
+| JA_final(3) | 4 |
+| JA_final(4) | 6 |
+| JA_final(5) | 12 |
+| JA_final(6) | 16 |
+
+**Fixed:** `STARTING_NET=None`, `EPOCHS=5000`, `NUM_EPOCHs_BUFFER=8`, `LR=7e-4`, `TAU=0.01`, `ARCHITECTURE=QuartoCNN_uncoupled`, `LOSS_APPROACH="combined_avg"`, `REWARD_FUNCTION="final"`.
+
+**Why include `12` and `16`?** They are worth running. The cheaper sweep `{2,3,4,6}` was enough to localize the transition zone, but `12` and `16` tell us whether `final` reward actually changes the long-horizon failure regime or only delays the same collapse.
+
+**Expected outcome:**
+- Better-behaved targets than `propagate`
+- Q-values should remain bounded by the discounted terminal reward chain
+- If the real issue is reward design rather than architecture, `N=3` and `N=4` should improve first
+
 **Result:** *(pending)*
+
+---
+
+## Literature Note — Branching DQN
+
+**Reference:** Tavakoli, Pardo, Kormushev, *Action Branching Architectures for Deep Reinforcement Learning*, AAAI 2018.
+
+**Main idea:** Use one shared state trunk and one action-value branch per action dimension, so output size grows linearly rather than combinatorially with a factored action space. The proposed BDQ agent combines a shared state-value stream with per-branch advantages.
+
+**Why it is relevant here:**
+- Quarto also has a factored decision structure: `place` and `select`.
+- The paper supports the general architectural idea of a shared representation plus per-action heads.
+- It suggests that branch coordination benefits from a shared state-value signal, not fully independent heads.
+
+**Why it is not a direct solution:**
+- In Branching DQN the action dimensions are chosen together at the same step and share the same temporal credit assignment.
+- In Quarto, `place` and `select` are sequential and asymmetric: `place` can have immediate terminal consequences, while `select` affects the opponent's next turn and only indirectly affects future return.
+- So the main Quarto difficulty is not just factorized actions; it is **asymmetric credit assignment across the two branches**.
+
+**Usefulness for future work:**
+- Worth exploring later if `JA_final` still fails.
+- Most promising takeaway: introduce a shared value anchor or a dueling-style decomposition instead of purely independent Bellman targets per head.
+- A broad literature review is not necessary yet; a **targeted** review around Branching DQN, dueling DQN, factored action spaces, and hierarchical / semi-MDP credit assignment will be more useful once the next reward-design experiment is run.
 
 ---
 
