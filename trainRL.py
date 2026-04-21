@@ -92,6 +92,7 @@ TEMPERATURE_EXPLORE = 2  # view test of temperature
 TEMPERATURE_EXPLOIT = 0.1
 
 FREQ_EPOCH_SAVING = 500  # save model, figures every n epochs
+CHECKPOINT_FREQ = 50  # save model weights every n epochs; final epoch is always saved
 
 
 # Plots are shown every epoch until this number of epochs. After that, only every
@@ -147,6 +148,7 @@ logger.info(f"Exp. gen.:\t{MATCHES_PER_EPOCH=}, {STEPS_PER_EPOCH=}, {REPLAY_SIZE
 logger.info(f"Network updates:\tFull buffer sweep each epoch, {TARGET_UPDATE_FREQ=}")
 logger.info(f"Exploration:\t{TEMPERATURE_EXPLORE=}, {TEMPERATURE_EXPLOIT=}")
 logger.info(f"N_LAST_STATES:\tINIT={N_LAST_STATES_INIT}, FINAL={N_LAST_STATES_FINAL}")
+logger.info(f"Checkpointing:\t{CHECKPOINT_FREQ=}, {FREQ_EPOCH_SAVING=}")
 logger.info(
     f"ENDGAME_FRACTION={ENDGAME_FRACTION}, N_LAST_STATES_ENDGAME={N_LAST_STATES_ENDGAME}"
 )
@@ -432,9 +434,10 @@ for e in tqdm(
         win_rate[rival_name].append(wr)
 
     # ------- SAVE RESULTS -----------
-    # --- Save the model at the end of each epoch
-    _fname = CKPT_NAME_GEN(e + 1)
-    policy_net.export_model(_fname, checkpoint_folder=CHECKPOINT_FOLDER)
+    # --- Save the model only at the configured checkpoint cadence
+    if (CHECKPOINT_FREQ > 0 and (e + 1) % CHECKPOINT_FREQ == 0) or (e + 1) == EPOCHS:
+        _fname = CKPT_NAME_GEN(e + 1)
+        policy_net.export_model(_fname, checkpoint_folder=CHECKPOINT_FOLDER)
 
     # ------ Store results
     epochs_results.append(dict(contest_results))
