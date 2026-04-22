@@ -2,12 +2,18 @@
 """View Q-value progress plots from saved experiment results.
 
 Usage:
-    python tools/view_qv.py <experiment_name> <variation_num>
+    python tools/view_qv.py <experiment_name> [variation_num] [plot_type]
 
 Examples:
     python tools/view_qv.py Ac_fineShallow 1
+    python tools/view_qv.py Ac_fineShallow
     python tools/view_qv.py Aa_replay 2
     python tools/view_qv.py Ab_data 3
+
+Notes:
+    - Default plot type is qv (Q-value histogram only).
+    - If variation_num is omitted, plots are generated for all matching experiment variations.
+    - plot_type can be: qv, wr, loss, all.
 
 If you don't know the exact folder name, run without arguments to list available experiments.
 """
@@ -80,91 +86,137 @@ def find_pkl(experiment_name: str, variation_num: int) -> str:
     return ""
 
 
+def find_pkls(experiment_name: str, variation_num: int | None = None) -> list[str]:
+    """Find one or many pickle files for an experiment."""
+    if variation_num is not None:
+        pkl = find_pkl(experiment_name, variation_num)
+        return [pkl] if pkl else []
+
+    # No variation number: return all matching experiment variations.
+    matches = glob.glob(path.join(CHECKPOINTS_DIR, f"{experiment_name}*", "*.pkl"))
+    return sorted(matches)
+
+
+def experiment_middle_title(full_name: str) -> str:
+    """Build middle-column title with base experiment and hyperparameter."""
+    import re
+
+    base_match = re.match(r"^(.+?)\(\d+\)", full_name)
+    if not base_match:
+        return full_name
+
+    base_exp = base_match.group(1)
+    tail = full_name[base_match.end() :]
+    tail = tail.lstrip("_")
+    if "_" not in tail:
+        return base_exp
+
+    # Tail format is typically: MMDD_PARAM_NAME_PARAM_VALUE
+    left, param_value = tail.rsplit("_", 1)
+    if "_" not in left:
+        return base_exp
+
+    _, param_name = left.split("_", 1)
+    return f"{base_exp}\n{param_name}={param_value}"
+
+
 def main():
-    if len(sys.argv) < 3:
+    if len(sys.argv) < 2:
         print(__doc__)
         print()
         list_experiments()
         sys.exit(0)
 
     exp_name = sys.argv[1]
-    var_num = int(sys.argv[2])
+    var_num = None
 
-    # Optional: which plots to show (default: all)
-    show_plots = sys.argv[3] if len(sys.argv) > 3 else "all"
+    # Optional: which plots to show (default: qv histogram only)
+    show_plots = "qv"
+    if len(sys.argv) > 2:
+        if sys.argv[2].isdigit():
+            var_num = int(sys.argv[2])
+            show_plots = sys.argv[3] if len(sys.argv) > 3 else "qv"
+        else:
+            show_plots = sys.argv[2]
 
-    pkl_path = find_pkl(exp_name, var_num)
-    if not pkl_path:
-        print(f"No results found for {exp_name}({var_num})")
+    pkl_paths = find_pkls(exp_name, var_num)
+    if not pkl_paths:
+        if var_num is None:
+            print(f"No results found for experiment prefix: {exp_name}")
+        else:
+            print(f"No results found for {exp_name}({var_num})")
         list_experiments()
         sys.exit(1)
 
-    print(f"Loading: {pkl_path}")
-    with open(pkl_path, "rb") as f:
-        data = CPUUnpickler(f).load()
+    print(f"Found {len(pkl_paths)} matching experiment(s).")
+    for pkl_path in pkl_paths:
+        print(f"Loading: {pkl_path}")
+        with open(pkl_path, "rb") as f:
+            data = CPUUnpickler(f).load()
 
-    full_name = path.basename(pkl_path).replace(".pkl", "")
-    folder = path.dirname(pkl_path)
+        full_name = path.basename(pkl_path).replace(".pkl", "")
+        folder = path.dirname(pkl_path)
 
-    # Save plots in results/<experiment_name>/
-    # Extract base experiment name (before the variation number)
-    import re
+        # Save plots in results/<experiment_name>/
+        # Extract base experiment name (before the variation number)
+        import re
 
-    base_match = re.match(r"^(.+?)\(\d+\)", full_name)
-    base_exp = base_match.group(1) if base_match else full_name
-    results_dir = path.join(path.dirname(__file__), "..", "results", base_exp)
-    if not path.exists(results_dir):
-        import os
+        base_match = re.match(r"^(.+?)\(\d+\)", full_name)
+        base_exp = base_match.group(1) if base_match else full_name
+        results_dir = path.join(path.dirname(__file__), "..", "results", base_exp)
+        if not path.exists(results_dir):
+            import os
 
-        os.makedirs(results_dir, exist_ok=True)
+            os.makedirs(results_dir, exist_ok=True)
 
-    qh = data["q_values_history"]
-    loss_data = data["loss_values"]
-    win_rate = data["win_rate"]
+        qh = data["q_values_history"]
+        loss_data = data["loss_values"]
+        win_rate = data["win_rate"]
 
-    print(f"Experiment: {full_name}")
-    print(f"  Epochs with Q-data: {len(qh.get('q_place', []))}")
-    print(f"  Loss points: {len(loss_data.get('loss_values', []))}")
-    print(f"  Win rate rivals: {list(win_rate.keys())}")
+        print(f"Experiment: {full_name}")
+        print(f"  Epochs with Q-data: {len(qh.get('q_place', []))}")
+        print(f"  Loss points: {len(loss_data.get('loss_values', []))}")
+        print(f"  Win rate rivals: {list(win_rate.keys())}")
 
-    rewards = qh["rewards"][0] if qh.get("rewards") else None
-    if rewards is None:
-        print("No reward data stored — cannot plot Q-value progress.")
-        sys.exit(1)
+        rewards = qh["rewards"][0] if qh.get("rewards") else None
+        if rewards is None:
+            print("No reward data stored — cannot plot Q-value progress.")
+            continue
 
-    if show_plots in ("all", "qv"):
-        plot_Qv_progress(
-            qh,
-            rewards,
-            fig_num=4,
-            DISPLAY_PLOT=True,
-            PLOT_TYPE="hist",
-            experiment_name=full_name,
-            FREQ_EPOCH_SAVING=1,
-            FOLDER_SAVE=results_dir,
-            FIG_NAME=lambda epoch: f"{full_name}_qv.svg",
-            current_epoch=1,
-        )
+        if show_plots in ("all", "qv"):
+            plot_Qv_progress(
+                qh,
+                rewards,
+                fig_num=4,
+                DISPLAY_PLOT=True,
+                PLOT_TYPE="hist",
+                experiment_name=full_name,
+                middle_column_title=experiment_middle_title(full_name),
+                FREQ_EPOCH_SAVING=1,
+                FOLDER_SAVE=results_dir,
+                FIG_NAME=lambda epoch: f"{full_name}_qv.png",
+                current_epoch=1,
+            )
 
-    if show_plots in ("all", "wr"):
-        plot_win_rate(
-            *win_rate.items(),
-            DISPLAY_PLOT=True,
-            experiment_name=full_name,
-            FREQ_EPOCH_SAVING=1,
-            FOLDER_SAVE=results_dir,
-            FIG_NAME=lambda epoch: f"{full_name}_win_rate.svg",
-        )
+        if show_plots in ("all", "wr"):
+            plot_win_rate(
+                *win_rate.items(),
+                DISPLAY_PLOT=True,
+                experiment_name=full_name,
+                FREQ_EPOCH_SAVING=1,
+                FOLDER_SAVE=results_dir,
+                FIG_NAME=lambda epoch: f"{full_name}_win_rate.png",
+            )
 
-    if show_plots in ("all", "loss"):
-        plot_loss(
-            loss_data,
-            DISPLAY_PLOT=True,
-            experiment_name=full_name,
-            FREQ_EPOCH_SAVING=1,
-            FOLDER_SAVE=results_dir,
-            FIG_NAME=lambda epoch: f"{full_name}_loss.svg",
-        )
+        if show_plots in ("all", "loss"):
+            plot_loss(
+                loss_data,
+                DISPLAY_PLOT=True,
+                experiment_name=full_name,
+                FREQ_EPOCH_SAVING=1,
+                FOLDER_SAVE=results_dir,
+                FIG_NAME=lambda epoch: f"{full_name}_loss.png",
+            )
 
     plt.show(block=True)
 
