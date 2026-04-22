@@ -785,9 +785,9 @@ def main():
 
     print(f"\n✓ All plots saved to: {results_dir}/")
     print("\nOpening plots in browser...")
-    fig_loss.show()
+    fig_loss.show(renderer="browser")
     if fig_wr is not None:
-        fig_wr.show()
+        fig_wr.show(renderer="browser")
 
 
 if __name__ == "__main__":
