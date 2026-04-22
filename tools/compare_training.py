@@ -13,6 +13,7 @@ Date: 2026
 import os
 import pickle
 import subprocess
+from datetime import datetime
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -380,6 +381,155 @@ def load_experiment_data(folder_info):
         return None
 
 
+def _compute_run_metrics(data, tail_fraction=0.1, peak_window=100):
+    """Return final-epoch metrics for one run.
+
+    Tail averaging smooths the last-epoch noise; peak is taken over a moving
+    average of the win rate so a single spiky epoch doesn't dominate.
+    """
+    loss_vals = to_numpy(data["loss_values"]["loss_values"])
+    epoch_vals = data["loss_values"].get("epoch_values", [])
+    n_epochs = len(epoch_vals) if hasattr(epoch_vals, "__len__") else 0
+
+    if len(loss_vals) > 0:
+        tail = max(1, int(len(loss_vals) * tail_fraction))
+        final_loss = float(np.mean(loss_vals[-tail:]))
+    else:
+        final_loss = float("nan")
+
+    final_wrs, peak_wrs = {}, {}
+    for rival, wr_list in data.get("win_rate", {}).items():
+        wr = to_numpy(wr_list)
+        if len(wr) == 0:
+            final_wrs[rival] = peak_wrs[rival] = None
+            continue
+        tail_e = max(1, int(len(wr) * tail_fraction))
+        final_wrs[rival] = float(np.mean(wr[-tail_e:]))
+        win = min(peak_window, len(wr))
+        if win > 1 and len(wr) >= win:
+            smoothed = np.convolve(wr, np.ones(win) / win, mode="valid")
+            peak_wrs[rival] = float(smoothed.max())
+        else:
+            peak_wrs[rival] = float(np.max(wr))
+
+    return {
+        "n_epochs": n_epochs,
+        "final_loss": final_loss,
+        "final_wrs": final_wrs,
+        "peak_wrs": peak_wrs,
+    }
+
+
+def write_summary_md(all_data, folders, results_dir, exp_filename, exp_display):
+    """Write a markdown summary table of per-run final metrics."""
+    rival_names = []
+    for data in all_data:
+        if data is not None and data.get("win_rate"):
+            rival_names = list(data["win_rate"].keys())
+            break
+
+    records = []
+    for folder_info, data in zip(folders, all_data):
+        if data is None:
+            continue
+        m = _compute_run_metrics(data)
+        records.append(
+            {
+                "name": folder_info["name"],
+                "param_value": folder_info["param_value"],
+                "param_name": folder_info.get("param_name", PARAM_NAME),
+                "is_baseline": folder_info.get("is_baseline", False),
+                "experiment": folder_info.get("experiment", ""),
+                **m,
+            }
+        )
+
+    def fmt_wr(v):
+        return f"{v:.1%}" if v is not None else "—"
+
+    def fmt_loss(v):
+        return f"{v:.4f}" if not np.isnan(v) else "—"
+
+    header = ["Run", "Param", "Epochs", "Final loss"]
+    for r in rival_names:
+        header.extend([f"Final vs {r}", f"Peak vs {r}"])
+
+    def render_table(recs):
+        if not recs:
+            return ""
+        rows = []
+        for rec in recs:
+            row = [
+                rec["name"],
+                f"{rec['param_name']}={format_param_value(rec['param_value'])}",
+                str(rec["n_epochs"]),
+                fmt_loss(rec["final_loss"]),
+            ]
+            for r in rival_names:
+                row.append(fmt_wr(rec["final_wrs"].get(r)))
+                row.append(fmt_wr(rec["peak_wrs"].get(r)))
+            rows.append(row)
+        widths = [
+            max(len(str(h)), *(len(str(r[i])) for r in rows))
+            for i, h in enumerate(header)
+        ]
+        out = [
+            "| "
+            + " | ".join(header[i].ljust(widths[i]) for i in range(len(header)))
+            + " |",
+            "|" + "|".join("-" * (w + 2) for w in widths) + "|",
+        ]
+        for r in rows:
+            out.append(
+                "| "
+                + " | ".join(str(r[i]).ljust(widths[i]) for i in range(len(header)))
+                + " |"
+            )
+        return "\n".join(out)
+
+    exp_records = [r for r in records if not r["is_baseline"]]
+    base_records = [r for r in records if r["is_baseline"]]
+
+    lines = [
+        f"# Summary — {exp_display}",
+        "",
+        f"Generated: {datetime.now():%Y-%m-%d %H:%M}",
+        f"Parameter varied: `{PARAM_NAME}`",
+        f"Runs: {len(exp_records)} (+ {len(base_records)} baselines)",
+        "",
+        "Final metrics = mean over the last 10% of epochs. `Peak` = max of the "
+        "smoothed win-rate curve reached at any point during training.",
+        "",
+    ]
+
+    if exp_records:
+        lines += ["## Experiment runs", "", render_table(exp_records), ""]
+    if base_records:
+        lines += ["## Baselines", "", render_table(base_records), ""]
+
+    if exp_records:
+        lines += ["## Best runs (experiments only)", ""]
+        valid_loss = [r for r in exp_records if not np.isnan(r["final_loss"])]
+        if valid_loss:
+            best_l = min(valid_loss, key=lambda r: r["final_loss"])
+            lines.append(
+                f"- Lowest final loss: **{best_l['name']}** — {fmt_loss(best_l['final_loss'])}"
+            )
+        for rival in rival_names:
+            valid = [r for r in exp_records if r["final_wrs"].get(rival) is not None]
+            if valid:
+                best = max(valid, key=lambda r: r["final_wrs"][rival])
+                lines.append(
+                    f"- Highest final WR vs {rival}: **{best['name']}** — "
+                    f"{fmt_wr(best['final_wrs'][rival])}"
+                )
+        lines.append("")
+
+    summary_path = results_dir / f"summary_{exp_filename}.md"
+    summary_path.write_text("\n".join(lines), encoding="utf-8")
+    return summary_path
+
+
 def plot_losses(all_data, folders):
     """Create interactive Plotly plot for loss comparison."""
     fig = go.Figure()
@@ -622,6 +772,11 @@ def main():
         wr_path = results_dir / f"comparison_win_rate_{exp_filename}.png"
         save_figure_png(fig_wr, wr_path, width=1400)
         print(f"✓ Win rate plot saved ({wr_path})")
+
+    summary_path = write_summary_md(
+        all_data, folders, results_dir, exp_filename, exp_display
+    )
+    print(f"✓ Summary saved ({summary_path})")
 
     print(f"\n✓ All plots saved to: {results_dir}/")
     print("\nOpening plots in browser...")
