@@ -60,15 +60,14 @@ PARAM_NAME = "N_LAST_STATES_INIT"
 #   [{"B02replicate": [1e-3]}]  # Include only one specific run
 
 BASELINEs = [
-    # {"B02replicate": [5e-4]},
-    # # {"B02replicate": [1e-3, 5e-4]},
-    # # {"B03_verLR": [7e-4, 2e-3]},
-    # {"B03_verLR": [2e-3]},
-    # {"Aa_replay": [8, 1024]},
-    # {"Ab_data": [8]},
-    # # {"Ab_data": [4, 8, 12]},
-
-    {"JA_final": [2,3,4,6,12,16]}
+    # {"B02replicate": [5e-4]}, # 10k epochs instead of 5k
+    # {"B02replicate": [1e-3, 5e-4]},
+    # {"B03_verLR": [7e-4, 2e-3]},
+    {"B03_verLR": [2e-3]},
+    {"Aa_replay": [8, 1024]},
+    {"Ab_data": [8]},
+    # {"Ab_data": [4, 8, 12]},
+    # {"JA_final": [2,3,4,6,12,16]}
 ]
 # BASELINEs = []  # Disable baselines
 
