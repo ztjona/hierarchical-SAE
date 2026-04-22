@@ -42,8 +42,10 @@ from tqdm import tqdm
 # PARAM_NAME = "N_LAST_STATES_INIT"
 # EXPERIMENT_NAME = "HA_mask"
 # PARAM_NAME = "N_LAST_STATES_INIT"
+# EXPERIMENT_NAME = "IA_unbound"
+# PARAM_NAME = "N_LAST_STATES_INIT"
 
-EXPERIMENT_NAME = "IA_unbound"
+EXPERIMENT_NAME = "JA_final"
 PARAM_NAME = "N_LAST_STATES_INIT"
 
 # BASELINEs: Include specific runs from previous experiments as reference points
