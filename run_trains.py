@@ -48,7 +48,11 @@ from datetime import datetime
 # PARAM_ITERATE = "N_LAST_STATES_INIT"
 # PARAMS = [3, 4, 5]
 
-EXPERIMENT_NAME = "JA_final"
+# EXPERIMENT_NAME = "JA_final"
+# PARAM_ITERATE = "N_LAST_STATES_INIT"
+# PARAMS = [2, 3, 4, 6, 12, 16]
+
+EXPERIMENT_NAME = "KA_coupled"
 PARAM_ITERATE = "N_LAST_STATES_INIT"
 PARAMS = [2, 3, 4, 6, 12, 16]
 

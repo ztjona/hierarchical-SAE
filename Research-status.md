@@ -11,6 +11,7 @@ Experiments use a two-part name: **`XY_description`**
   - `H`: separate_bellman + terminal state masking (HA_mask)
   - `I`: unbounded Q-values — no tanh (IA_unbound)
   - `J`: final-only rewards with standard bounded uncoupled DQN (JA_final)
+  - `K`: final-only rewards with coupled place→select architecture (KA_coupled)
 - **Second letter (Y)** — Hyperparameter sweep within the same code version:
   - `a`, `b`, `c`, ... for successive sweeps (e.g., Aa_replay, Ab_data, Ac_fine)
 
@@ -329,7 +330,45 @@ Rationale:
 - Q-values should remain bounded by the discounted terminal reward chain
 - If the real issue is reward design rather than architecture, `N=3` and `N=4` should improve first
 
-**Result:** *(pending)*
+**Result:** Clear improvement over `Ab_data` and `IA_unbound`, but only partial success.
+
+From the summary and Q-value plots:
+- `N=2` recovered the known-good regime: final WR `66.4%` vs `bot_loss-BT`, `80.2%` vs `bot_random`, close to `Aa_replay(2)`.
+- `N=3` remained viable: `52.7%` vs `bot_loss-BT`, `71.9%` vs `bot_random`.
+- `N>=4` still degraded monotonically with horizon; `N=12` and `N=16` had the lowest losses but the worst win rates.
+- Q-value plots show `q_select` is still effectively dead at `N=2` and `N=4` (collapsed near `-1` regardless of reward class).
+- At `N=16`, `q_select` escapes saturation but still does not separate reward classes meaningfully, so the branch is no longer saturated but is still not informative.
+
+**Conclusion:** `final` reward fixed a real target-instability problem, but did **not** solve select-head learning. The mismatch between low loss and poor win rate at large `N` means the model is fitting easy targets rather than learning a useful policy. This shifts the main hypothesis from reward design alone to **state / architecture mismatch for the select decision**.
+
+---
+
+## KA_coupled — Final Reward with Coupled Place→Select Architecture (N_LAST_STATES sweep)
+
+**Question:** Does conditioning the select head on the board-placement head restore a useful learning signal for piece selection?
+
+**Code change:** Switch from `QuartoCNN_uncoupled` to `QuartoCNN` in `models/CNN1.py`, keeping `LOSS_APPROACH="combined_avg"` and `REWARD_FUNCTION="final"` unchanged.
+
+Rationale:
+- In Quarto, selecting the next piece happens **after** placement, on a changed board.
+- `QuartoCNN_uncoupled` predicts `q_select` from the same pre-placement latent as `q_place`, which appears structurally misaligned with the game.
+- `QuartoCNN` is still approximate, but it at least conditions the piece head on `qav_board`, making the select decision depend on the placement decision.
+
+| Run | N_LAST_STATES_INIT |
+|-----|---------------------|
+| KA_coupled(1) | 2 |
+| KA_coupled(2) | 3 |
+| KA_coupled(3) | 4 |
+| KA_coupled(4) | 6 |
+| KA_coupled(5) | 12 |
+| KA_coupled(6) | 16 |
+
+**Fixed:** `STARTING_NET=None`, `EPOCHS=5000`, `NUM_EPOCHs_BUFFER=8`, `LR=7e-4`, `TAU=0.01`, `ARCHITECTURE=QuartoCNN`, `LOSS_APPROACH="combined_avg"`, `REWARD_FUNCTION="final"`.
+
+**Expected outcome:**
+- `q_select` should stop being reward-agnostic at small `N`
+- If coupling is the missing ingredient, `N=3` and `N=4` should improve first, while `N=12` and `N=16` remain hard
+- If there is no improvement, the next step should be a more principled two-stage architecture where the select head sees the post-placement board state directly
 
 ---
 
@@ -350,7 +389,7 @@ Rationale:
 - So the main Quarto difficulty is not just factorized actions; it is **asymmetric credit assignment across the two branches**.
 
 **Usefulness for future work:**
-- Worth exploring later if `JA_final` still fails.
+- Still useful after `JA_final`, but lower priority than testing a coupled architecture first.
 - Most promising takeaway: introduce a shared value anchor or a dueling-style decomposition instead of purely independent Bellman targets per head.
 - A broad literature review is not necessary yet; a **targeted** review around Branching DQN, dueling DQN, factored action spaces, and hierarchical / semi-MDP credit assignment will be more useful once the next reward-design experiment is run.
 
