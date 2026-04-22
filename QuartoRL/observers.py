@@ -123,6 +123,7 @@ def plot_Qv_progress(
     PLOT_TYPE: str = "time_series",
     position: tuple[int, int] | None = (0, 0),
     experiment_name: str = "",
+    middle_column_title: str = "",
     FREQ_EPOCH_SAVING: int = -1,
     FOLDER_SAVE: str = "./",
     FIG_NAME=lambda epoch: f"{datetime.now().strftime('%Y%m%d_%H%M')}-qv_progress_{epoch:04d}.svg",
@@ -148,6 +149,8 @@ def plot_Qv_progress(
         (x, y) position in pixels for top-left corner of figure window
     experiment_name : str
         Experiment name to include in figure window title (default: "")
+    middle_column_title : str
+        Optional title prefix shown in middle-column subplots (default: "")
     FREQ_EPOCH_SAVING : int
         If -1, no saving. Otherwise, save figure every n epochs (default: -1)
     FOLDER_SAVE : str
@@ -162,10 +165,12 @@ def plot_Qv_progress(
 
     # Extract Q-values, normalizing to numpy arrays (values may have been stored as plain lists)
     q_place_history = [
-        np.array(q) if isinstance(q, list) else q for q in q_values_history.get("q_place", [])
+        np.array(q) if isinstance(q, list) else q
+        for q in q_values_history.get("q_place", [])
     ]
     q_select_history = [
-        np.array(q) if isinstance(q, list) else q for q in q_values_history.get("q_select", [])
+        np.array(q) if isinstance(q, list) else q
+        for q in q_values_history.get("q_select", [])
     ]
 
     # Normalize rewards to numpy array (may be tensor, list, or array)
@@ -178,7 +183,7 @@ def plot_Qv_progress(
     # This handles cases where different epochs have different numbers of samples
     if not q_place_history:
         return
-    
+
     min_size_across_epochs = min(q.shape[0] for q in q_place_history)
     batch_size = min(rewards.shape[0], min_size_across_epochs)
     n_epochs = len(q_place_history)
@@ -319,13 +324,20 @@ def plot_Qv_progress(
                     va="center",
                     transform=ax.transAxes,
                 )
-                ax.set_title(title)
+                if col == 1 and middle_column_title:
+                    ax.set_title(f"{middle_column_title}\n{title}")
+                else:
+                    ax.set_title(title)
                 continue
 
             # Compute histograms for this reward group across epochs
             hist_data = []
             for q_epoch in q_history:
-                q_epoch_arr = q_epoch.detach().cpu().numpy() if hasattr(q_epoch, 'detach') else np.array(q_epoch)
+                q_epoch_arr = (
+                    q_epoch.detach().cpu().numpy()
+                    if hasattr(q_epoch, "detach")
+                    else np.array(q_epoch)
+                )
                 q_subset = q_epoch_arr[indices].flatten()
                 hist, _ = np.histogram(q_subset, bins=HIST_BINS, range=HIST_RANGE)
                 # Normalize to percentage
@@ -349,7 +361,10 @@ def plot_Qv_progress(
                 # Only show y-label on leftmost column
                 if col == 0:
                     ax.set_ylabel("Q-value")
-                ax.set_title(title)
+                if col == 1 and middle_column_title:
+                    ax.set_title(f"{middle_column_title}\n{title}")
+                else:
+                    ax.set_title(title)
                 ax.grid(True, alpha=0.3)
                 plt.colorbar(im, ax=ax, label="Percentage (%)")
 
