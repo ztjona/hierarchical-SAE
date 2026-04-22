@@ -71,6 +71,7 @@ The `LOSS_APPROACH` parameter controls how Q_place and Q_select losses are combi
 | `only_place` | Only trains Q_place head, Q_select zeroed. |
 | `only_select` | Only trains Q_select head, Q_place zeroed. |
 | `separate_bellman` | Independent Bellman per head: `loss = (L_place + L_select) / 2`. Each head gets its own target. |
+| `mc_select` | Q_place uses standard Bellman; Q_select is supervised with the Monte Carlo return `γ^steps_to_terminal * outcome`, avoiding a noisy self-bootstrap through the select head. |
 
 ### Training Loop (`trainRL.py`)
 

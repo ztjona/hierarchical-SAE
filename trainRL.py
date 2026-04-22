@@ -35,12 +35,13 @@ logger.info("Imports done.")
 
 # STARTING_NET = "CHECKPOINTS\\Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8\\20260227_1103-Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8_E_5000.pt"
 STARTING_NET = None  # Set to None to start with random weights
-EXPERIMENT_NAME = "KA_coupled"
+EXPERIMENT_NAME = "LA_mcSelect"
 CHECKPOINT_FOLDER = f"./CHECKPOINTS/{EXPERIMENT_NAME}/"
 # ARCHITECTURE = QuartoCNN
-ARCHITECTURE = QuartoCNN
-LOSS_APPROACH = "combined_avg"  # Options: "combined_avg", "only_select", "only_place", "separate_bellman"
-REWARD_FUNCTION = "final"  # "final", "propagate", "discount"
+ARCHITECTURE = QuartoCNN_uncoupled
+LOSS_APPROACH = "mc_select"  # Options: "combined_avg", "only_select", "only_place", "separate_bellman", "mc_select"
+# REWARD_FUNCTION = "final"  # "final", "propagate", "discount"
+REWARD_FUNCTION = "propagate"  # "final", "propagate", "discount"
 
 # if True, experience is generated at the beginning of each epoch
 # if False, experience is generated only at the first epoch and reused for the rest of epochs
@@ -57,7 +58,7 @@ mode_2x2 = True
 EPOCHS = 5_000
 
 # number of last states to consider in the experience generation at the beginning of training
-N_LAST_STATES_INIT = 2  # Sweep variable for KA_coupled
+N_LAST_STATES_INIT = 2  # Sweep variable for LA_mcSelect
 # number of last states to consider in the experience generation at the end of training. -1 means all states
 N_LAST_STATES_FINAL = N_LAST_STATES_INIT  # No curriculum, constant
 
@@ -339,8 +340,9 @@ for e in tqdm(
             GAMMA=GAMMA,
             LOSS_APPROACH=LOSS_APPROACH,
         )
-        if LOSS_APPROACH == "separate_bellman":
-            # Separate Bellman: average of independent per-head losses
+        if LOSS_APPROACH in ("separate_bellman", "mc_select"):
+            # Per-head losses: separate_bellman → Bellman targets both heads;
+            # mc_select → Bellman for Q_place, Monte Carlo return for Q_select.
             q_place, target_place, q_select, target_select = dqn_result  # type: ignore
             loss = (
                 loss_fcn(q_place, target_place) + loss_fcn(q_select, target_select)

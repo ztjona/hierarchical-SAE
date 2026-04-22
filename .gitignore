@@ -1,6 +1,7 @@
 .vscode/
 logs/**.log
 *.html
+.claude/
 # train_scripts/**.py
 # train_scripts/legacy/**.py
 

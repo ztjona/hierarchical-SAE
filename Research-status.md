@@ -12,6 +12,7 @@ Experiments use a two-part name: **`XY_description`**
   - `I`: unbounded Q-values — no tanh (IA_unbound)
   - `J`: final-only rewards with standard bounded uncoupled DQN (JA_final)
   - `K`: final-only rewards with coupled place→select architecture (KA_coupled)
+  - `L`: Monte Carlo return target on Q_select (LA_mcSelect)
 - **Second letter (Y)** — Hyperparameter sweep within the same code version:
   - `a`, `b`, `c`, ... for successive sweeps (e.g., Aa_replay, Ab_data, Ac_fine)
 
@@ -232,7 +233,7 @@ This explains why N=2 still worked (only 2 Bellman steps, limited divergence) wh
 | **Mask terminal states from Q_select loss** | Exclude states where `action_sel=-1` from Q_select loss. Similarly mask first-move from Q_place loss. | Low | **HA_mask** (in progress) |
 | **Remove tanh from Q_select** | Use unbounded Q-values (standard DQN) or clamp. Prevents gradient vanishing at ±1 boundary. | Low | Pending |
 | **Decouple transitions** | Restructure experience: separate place and select transitions with independent Bellman equations. | High | Pending |
-| **Monte Carlo returns for Q_select** | Use actual game outcome as Q_select target instead of bootstrapping through the noisy Q_select head. | Medium | Pending |
+| **Monte Carlo returns for Q_select** | Use actual game outcome as Q_select target instead of bootstrapping through the noisy Q_select head. | Medium | **LA_mcSelect** (in progress) |
 | **Asymmetric learning rates** | Higher LR or more gradient steps for Q_select to compensate for weaker signal. | Low | Pending |
 
 ---
@@ -369,6 +370,61 @@ Rationale:
 - `q_select` should stop being reward-agnostic at small `N`
 - If coupling is the missing ingredient, `N=3` and `N=4` should improve first, while `N=12` and `N=16` remain hard
 - If there is no improvement, the next step should be a more principled two-stage architecture where the select head sees the post-placement board state directly
+
+**Result:** No meaningful improvement over `JA_final`. Final win rates vs `bot_loss-BT` track `JA_final` to within ~1–2pp at every `N` (see `results/KA_coupled/summary_KA_coupled.md`):
+
+| N | Final WR vs bot_loss-BT | Final WR vs bot_random |
+|---|-------------------------|------------------------|
+| 2 | 66.7% | 80.1% |
+| 3 | 54.0% | 74.4% |
+| 4 | 45.2% | 67.6% |
+| 6 | 41.1% | 63.4% |
+| 12 | 34.2% | 57.4% |
+| 16 | 33.9% | 55.7% |
+
+Same monotonic `N`-cliff as every prior experiment. Same low-loss / bad-WR inversion at large `N` (N=16 has the lowest final loss, 0.048, and the lowest win rate). The Q-value plots are diagnostically identical to `JA_final`:
+
+- **N=2:** `q_place` separates reward classes cleanly; `q_select` is a bright band pegged at −1 across R=−1, R=0, and R=+1. Dead, tanh-saturated.
+- **N=4:** `q_place` learns weakly; `q_select` still pegged at −1.
+- **N=16:** `q_place` collapses to a near-constant ~0.7 regardless of reward class (fitting the mean). `q_select` escapes −1 saturation but sits as a near-constant ~0–0.3 band across all reward classes — no longer saturated, but still uninformative.
+
+**Conclusion:** Coupling the select head on `qav_board` in `QuartoCNN` was not enough to change `q_select`'s behaviour — the head still only sees the pre-placement board through the shared trunk, and, more importantly, **the Q_select pathology reproduces across code versions A, F, G, H, I, J, K**. That is strong evidence the bottleneck is the **target/credit design for the select branch**, not the architecture of its input. Next step: replace the Bellman target on Q_select with a Monte Carlo return (`LA_mcSelect`).
+
+---
+
+## LA_mcSelect — Monte Carlo Return Target on Q_select (N_LAST_STATES sweep)
+
+**Question:** Does supervising Q_select with the actual discounted game outcome — instead of bootstrapping through the noisy Q_select head — restore a useful learning signal for piece selection?
+
+**Code change:**
+- New `LOSS_APPROACH="mc_select"` in `QuartoRL/RL_functions.py`:
+  - Q_place: standard Bellman target `R + γ · max_a' Q_place(s')`.
+  - Q_select: Monte Carlo return `γ^steps_to_terminal · outcome`, with no bootstrap through Q_select.
+  - Masking from `HA_mask` preserved (first-move zeroes Q_place loss; terminal zeroes Q_select loss).
+- Experience tuple extended with two new fields, computed independently of `REWARD_FUNCTION_TYPE`:
+  - `outcome`: ±1 (or 0 for ties) from this state's player's perspective.
+  - `steps_to_terminal`: distance from state `i` to the terminal state `T-1`.
+- Architecture reverted from `QuartoCNN` (coupled) back to `QuartoCNN_uncoupled`: the `KA_coupled` coupling hypothesis was falsified, and the MC hypothesis is orthogonal to architecture — isolating the target-design change requires the best-known architecture.
+
+Rationale (from `Current Open Problem` → Q_select saturation):
+- `q_select` has no clean supervised anchor; under every Bellman variant tried so far it mostly bootstraps from itself through the target net, which stays near-constant and never produces a useful gradient on reward separation.
+- With `final` rewards, intermediate transitions carry 0 reward; under MC the Q_select target becomes exactly `γ^k · outcome`, which is bounded in `[−1, 1]` (safe for tanh), independent of bootstrap noise, and carries the reward-class signal to every non-terminal state.
+
+| Run | N_LAST_STATES_INIT |
+|-----|---------------------|
+| LA_mcSelect(1) | 2 |
+| LA_mcSelect(2) | 3 |
+| LA_mcSelect(3) | 4 |
+| LA_mcSelect(4) | 6 |
+| LA_mcSelect(5) | 12 |
+| LA_mcSelect(6) | 16 |
+
+**Fixed:** `STARTING_NET=None`, `EPOCHS=5000`, `NUM_EPOCHs_BUFFER=8`, `LR=7e-4`, `TAU=0.01`, `GAMMA=0.99`, `ARCHITECTURE=QuartoCNN_uncoupled`, `LOSS_APPROACH="mc_select"`, `REWARD_FUNCTION="final"`.
+
+**Expected outcome / decision gate:**
+- **Primary diagnostic:** the qv plots at `N=2`. If the R=+1 band of `q_select` sits measurably above the R=−1 band, the hypothesis is confirmed — Q_select's failure across A/F/G/H/I/J/K was a self-bootstrap / anchoring problem, not a representational one.
+- If confirmed at small `N`, check whether the `N`-cliff is also softened. `N=3` and `N=4` should improve first; `N=12`/`N=16` likely remain hard (those are the regime `Ad_endgame` is meant to attack, not LA).
+- If `q_select` stays flat / unseparated even at `N=2`, the problem is structural to the select transition itself (place and select shouldn't share one reward tuple), and the next move is to decouple the transitions rather than keep iterating on targets.
 
 ---
 

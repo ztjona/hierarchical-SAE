@@ -164,6 +164,15 @@ def convert_2_state_action_reward(match_data, REWARD_FUNCTION_TYPE: str = "propa
     done = [False] * _num_non_terminal_states
     done.append(True)  # only last state is the terminal state
 
+    # ---- OUTCOME (per-state player perspective, independent of REWARD_FUNCTION_TYPE)
+    # +1 if this state's player eventually wins, -1 if loses, 0 if tie.
+    # P1 plays at i%2==0, P2 at i%2==1. Final result R is from P1's perspective.
+    outcome = [R if i % 2 == 0 else R_2 for i in range(_num_states)]
+
+    # ---- STEPS_TO_TERMINAL (distance from state i to the terminal state T-1)
+    # Used to form Monte Carlo targets: G_i = gamma^steps_to_terminal_i * outcome_i
+    steps_to_terminal = [_num_states - 1 - i for i in range(_num_states)]
+
     df = pd.DataFrame(
         {
             # but board_state and board_next_state are str
@@ -177,6 +186,8 @@ def convert_2_state_action_reward(match_data, REWARD_FUNCTION_TYPE: str = "propa
             "action_sel": action_sel,
             "reward": reward,
             "done": done,
+            "outcome": outcome,
+            "steps_to_terminal": steps_to_terminal,
         }
     )
     return df
@@ -322,6 +333,12 @@ def gen_experience(
             ),  # -1 means no action
             "reward": torch.tensor(p_all["reward"].to_numpy(), dtype=torch.float32),
             "done": torch.tensor(p_all["done"].to_numpy(), dtype=torch.bool),
+            "outcome": torch.tensor(
+                p_all["outcome"].to_numpy(), dtype=torch.float32
+            ),
+            "steps_to_terminal": torch.tensor(
+                p_all["steps_to_terminal"].to_numpy(), dtype=torch.float32
+            ),
         },
         batch_size=[p_all.shape[0]],
         device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
@@ -352,7 +369,7 @@ def DQN_training_step(
     exp_batch : TensorDict
         Batch of experiences with state, action, reward, next_state, done
     LOSS_APPROACH : str
-        Approach for computing state-action values. Options are "combined_avg", "only_select", "only_place", "separate_bellman".
+        Approach for computing state-action values. Options are "combined_avg", "only_select", "only_place", "separate_bellman", "mc_select".
     Returns
     -------
     For "combined_avg", "only_select", "only_place":
@@ -360,15 +377,17 @@ def DQN_training_step(
             Q-values for the actions taken in the batch
         expected_state_action_values : torch.Tensor
             Target Q-values computed using target network and Bellman equation
-    For "separate_bellman":
+    For "separate_bellman", "mc_select":
         state_place_values : torch.Tensor
             Q_place values for placement actions taken
         expected_place : torch.Tensor
-            Bellman targets for placement head
+            Target for placement head (Bellman in both cases)
         state_select_values : torch.Tensor
             Q_select values for selection actions taken
         expected_select : torch.Tensor
-            Bellman targets for selection head
+            Target for selection head. For "separate_bellman" this is the Bellman
+            target; for "mc_select" it is the Monte Carlo return
+            gamma^steps_to_terminal * outcome, with no bootstrap through Q_select.
     """
     # Ensure networks are in correct mode
     policy_net.train()
@@ -460,7 +479,7 @@ def DQN_training_step(
         state_action_values = state_sel_action_values
     elif LOSS_APPROACH == "only_place":
         state_action_values = state_place_action_values
-    elif LOSS_APPROACH == "separate_bellman":
+    elif LOSS_APPROACH in ("separate_bellman", "mc_select"):
         # Handled below — returns per-head values instead of a combined scalar
         pass
     else:
@@ -501,6 +520,36 @@ def DQN_training_step(
         # Terminal states have no selection (action_sel=-1) → Q_select_pred is 0 → set target to 0.
         # Without this, terminal states produce SmoothL1(0, ±1) every epoch,
         # pushing Q_select into tanh saturation.
+        expected_place[first_move_mask] = 0.0
+        expected_select[final_move_mask] = 0.0
+
+        return (
+            state_place_action_values,
+            expected_place,
+            state_sel_action_values,
+            expected_select,
+        )
+
+    if LOSS_APPROACH == "mc_select":
+        # Q_place uses the standard Bellman target; Q_select is supervised with the
+        # Monte Carlo return computed from the actual game outcome, avoiding a
+        # noisy self-bootstrap.
+        #   loss_place  = SmoothL1(Q_place[a],  R + γ * max_a' Q_place(s'))
+        #   loss_select = SmoothL1(Q_select[a], γ^steps_to_terminal * outcome)
+        next_place_values = torch.zeros(
+            exp_batch.shape, device=exp_batch["reward"].device
+        )
+        with torch.no_grad():
+            next_place_values[non_terminal_mask] = _next_state_pos.max(dim=1).values
+
+        reward = exp_batch["reward"]
+        expected_place = reward + (next_place_values * GAMMA)
+
+        outcome = exp_batch["outcome"]
+        steps = exp_batch["steps_to_terminal"]
+        expected_select = (GAMMA**steps) * outcome
+
+        # Same masking as separate_bellman: zero-out invalid-action losses.
         expected_place[first_move_mask] = 0.0
         expected_select[final_move_mask] = 0.0
 
