@@ -35,10 +35,10 @@ logger.info("Imports done.")
 
 # STARTING_NET = "CHECKPOINTS\\Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8\\20260227_1103-Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8_E_5000.pt"
 STARTING_NET = None  # Set to None to start with random weights
-EXPERIMENT_NAME = "JA_final"
+EXPERIMENT_NAME = "KA_coupled"
 CHECKPOINT_FOLDER = f"./CHECKPOINTS/{EXPERIMENT_NAME}/"
 # ARCHITECTURE = QuartoCNN
-ARCHITECTURE = QuartoCNN_uncoupled
+ARCHITECTURE = QuartoCNN
 LOSS_APPROACH = "combined_avg"  # Options: "combined_avg", "only_select", "only_place", "separate_bellman"
 REWARD_FUNCTION = "final"  # "final", "propagate", "discount"
 
@@ -57,7 +57,7 @@ mode_2x2 = True
 EPOCHS = 5_000
 
 # number of last states to consider in the experience generation at the beginning of training
-N_LAST_STATES_INIT = 2  # Sweep variable for JA_final
+N_LAST_STATES_INIT = 2  # Sweep variable for KA_coupled
 # number of last states to consider in the experience generation at the end of training. -1 means all states
 N_LAST_STATES_FINAL = N_LAST_STATES_INIT  # No curriculum, constant
 
