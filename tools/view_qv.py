@@ -45,6 +45,10 @@ class CPUUnpickler(pickle.Unpickler):
 
 CHECKPOINTS_DIR = path.join(path.dirname(__file__), "..", "CHECKPOINTS")
 
+# Regenerated PNGs must fit under the 2576x2576 viewer limit.
+# With figsize up to (16, 10), dpi=150 → 2400x1500 px, comfortably in range.
+VIEW_DPI = 150
+
 
 def list_experiments():
     """List all experiments with pickle files."""
@@ -196,6 +200,7 @@ def main():
                 FOLDER_SAVE=results_dir,
                 FIG_NAME=lambda epoch: f"{full_name}_qv.png",
                 current_epoch=1,
+                SAVEFIG_DPI=VIEW_DPI,
             )
 
         if show_plots in ("all", "wr"):
@@ -206,6 +211,7 @@ def main():
                 FREQ_EPOCH_SAVING=1,
                 FOLDER_SAVE=results_dir,
                 FIG_NAME=lambda epoch: f"{full_name}_win_rate.png",
+                SAVEFIG_DPI=VIEW_DPI,
             )
 
         if show_plots in ("all", "loss"):
@@ -216,6 +222,7 @@ def main():
                 FREQ_EPOCH_SAVING=1,
                 FOLDER_SAVE=results_dir,
                 FIG_NAME=lambda epoch: f"{full_name}_loss.png",
+                SAVEFIG_DPI=VIEW_DPI,
             )
 
     plt.show(block=True)

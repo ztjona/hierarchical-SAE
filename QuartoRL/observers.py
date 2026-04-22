@@ -36,6 +36,7 @@ def plot_boards_comp(
     FOLDER_SAVE: str = "./",
     FIG_NAME=lambda epoch: f"{datetime.now().strftime('%Y%m%d_%H%M')}-boards_comp_{epoch:04d}.svg",
     current_epoch: int = 0,
+    SAVEFIG_DPI: int = 1000,
 ) -> None:
     """Plot pairs of boards side by side in a 2xn subplot grid (transposed).
 
@@ -105,7 +106,7 @@ def plot_boards_comp(
     if current_epoch % FREQ_EPOCH_SAVING == 0 and FREQ_EPOCH_SAVING != -1:
         plt.savefig(
             path.join(FOLDER_SAVE, FIG_NAME(current_epoch)),
-            dpi=1000,
+            dpi=SAVEFIG_DPI,
             bbox_inches="tight",
         )
 
@@ -128,6 +129,7 @@ def plot_Qv_progress(
     FOLDER_SAVE: str = "./",
     FIG_NAME=lambda epoch: f"{datetime.now().strftime('%Y%m%d_%H%M')}-qv_progress_{epoch:04d}.svg",
     current_epoch: int = 0,
+    SAVEFIG_DPI: int = 1000,
 ) -> None:
     """Plot Q-value progression over epochs for each sample in the batch.
 
@@ -372,7 +374,7 @@ def plot_Qv_progress(
     if current_epoch % FREQ_EPOCH_SAVING == 0 and FREQ_EPOCH_SAVING != -1:
         plt.savefig(
             path.join(FOLDER_SAVE, FIG_NAME(current_epoch)),
-            dpi=1000,
+            dpi=SAVEFIG_DPI,
             bbox_inches="tight",
         )
 
