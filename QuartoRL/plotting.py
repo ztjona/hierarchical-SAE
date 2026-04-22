@@ -28,6 +28,7 @@ def plot_win_rate(
     FOLDER_SAVE: str = "./",
     FIG_NAME=lambda epoch: f"{datetime.now().strftime('%Y%m%d_%H%M')}-win_rate_{epoch:04d}.svg",
     DISPLAY_PLOT: bool = False,
+    SAVEFIG_DPI: int = 1000,
     fig_num: int = 1,
     position: tuple[int, int] | None = (500, 600),
     experiment_name: str = "",
@@ -137,7 +138,7 @@ def plot_win_rate(
     if len(win_rates) % FREQ_EPOCH_SAVING == 0 and FREQ_EPOCH_SAVING != -1:
         plt.savefig(
             path.join(FOLDER_SAVE, FIG_NAME(len(win_rates))),
-            dpi=1000,
+            dpi=SAVEFIG_DPI,
             bbox_inches="tight",
         )
 
@@ -151,6 +152,7 @@ def plot_loss(
     fig_num: int = 2,
     position: tuple[int, int] | None = (0, 600),
     experiment_name: str = "",
+    SAVEFIG_DPI: int = 1000,
 ):
     """
     Plot average loss per epoch with standard deviation error bands.
@@ -247,7 +249,7 @@ def plot_loss(
     if n_epochs % FREQ_EPOCH_SAVING == 0 and FREQ_EPOCH_SAVING != -1:
         plt.savefig(
             path.join(FOLDER_SAVE, FIG_NAME(n_epochs)),
-            dpi=1000,
+            dpi=SAVEFIG_DPI,
             bbox_inches="tight",
         )
 
