@@ -117,11 +117,12 @@ def plot_boards_comp(
 
 def plot_Qv_progress(
     q_values_history: dict[str, list[torch.Tensor]],
-    rewards: torch.Tensor,
+    group_values: torch.Tensor,
     fig_num: int = 4,
     DISPLAY_PLOT: bool = True,
     done_v: torch.Tensor | None = None,
     PLOT_TYPE: str = "time_series",
+    group_label: str = "Outcome",
     position: tuple[int, int] | None = (0, 0),
     experiment_name: str = "",
     middle_column_title: str = "",
@@ -138,8 +139,8 @@ def plot_Qv_progress(
     q_values_history : dict[str, list[torch.Tensor]]
         Dictionary with keys 'q_place' and 'q_select', each containing a list of
         tensors (one per epoch) with Q-values for each sample
-    rewards : torch.Tensor
-        Target rewards for each sample (batch_size,)
+    group_values : torch.Tensor
+        Perspective labels used to group samples (batch_size,)
     fig_num : int
         Figure number to use for plotting (default: 4)
     DISPLAY_PLOT : bool
@@ -175,11 +176,11 @@ def plot_Qv_progress(
         for q in q_values_history.get("q_select", [])
     ]
 
-    # Normalize rewards to numpy array (may be tensor, list, or array)
-    if isinstance(rewards, list):
-        rewards = np.array(rewards)
-    elif hasattr(rewards, "detach"):
-        rewards = rewards.detach().cpu().numpy()
+    # Normalize grouping labels to numpy array (may be tensor, list, or array)
+    if isinstance(group_values, list):
+        group_values = np.array(group_values)
+    elif hasattr(group_values, "detach"):
+        group_values = group_values.detach().cpu().numpy()
 
     # Use minimum size across all epochs to ensure all indices are valid
     # This handles cases where different epochs have different numbers of samples
@@ -187,7 +188,7 @@ def plot_Qv_progress(
         return
 
     min_size_across_epochs = min(q.shape[0] for q in q_place_history)
-    batch_size = min(rewards.shape[0], min_size_across_epochs)
+    batch_size = min(group_values.shape[0], min_size_across_epochs)
     n_epochs = len(q_place_history)
 
     if batch_size == 0:
@@ -216,29 +217,28 @@ def plot_Qv_progress(
 
     axes = fig.subplots(2, 3)
 
-    # Split samples by reward value (round to handle decimal rewards)
-    loss_indices = [i for i in range(batch_size) if round(rewards[i].item()) == -1]
-    draw_indices = [i for i in range(batch_size) if round(rewards[i].item()) == 0]
-    win_indices = [i for i in range(batch_size) if round(rewards[i].item()) == 1]
+    # Split samples by perspective group value.
+    rounded_groups = np.rint(group_values[:batch_size]).astype(int)
+    loss_indices = [i for i in range(batch_size) if rounded_groups[i] == -1]
+    draw_indices = [i for i in range(batch_size) if rounded_groups[i] == 0]
+    win_indices = [i for i in range(batch_size) if rounded_groups[i] == 1]
 
-    # Define plot configurations: (row, col, indices, q_history, title)
+    # Define plot configurations: (row, col, indices, q_history, head name, ref value)
     plot_configs = [
-        (0, 0, loss_indices, q_place_history, "Q_place: R=-1"),
-        (0, 1, draw_indices, q_place_history, "Q_place: R=0"),
-        (0, 2, win_indices, q_place_history, "Q_place: R=1"),
-        (1, 0, loss_indices, q_select_history, "Q_select: R=-1"),
-        (1, 1, draw_indices, q_select_history, "Q_select: R=0"),
-        (1, 2, win_indices, q_select_history, "Q_select: R=1"),
+        (0, 0, loss_indices, q_place_history, "Q_place", -1),
+        (0, 1, draw_indices, q_place_history, "Q_place", 0),
+        (0, 2, win_indices, q_place_history, "Q_place", 1),
+        (1, 0, loss_indices, q_select_history, "Q_select", -1),
+        (1, 1, draw_indices, q_select_history, "Q_select", 0),
+        (1, 2, win_indices, q_select_history, "Q_select", 1),
     ]
 
     if PLOT_TYPE == "time_series":
-        # plot 6 aggregated curves grouped by reward value
+        # plot 6 aggregated curves grouped by perspective value
 
-        for row, col, indices, q_history, title in plot_configs:
+        for row, col, indices, q_history, head_name, reference_value in plot_configs:
             ax = axes[row, col]  # type: ignore
-
-            # Determine target reward from title
-            target_reward = -1 if "R=-1" in title else (0 if "R=0" in title else 1)
+            title = f"{head_name}: {group_label}={reference_value}"
 
             # Plot individual Q-value trajectories
             q_values_all = []  # Collect all Q-values for computing mean
@@ -255,14 +255,14 @@ def plot_Qv_progress(
                     color="gray",
                 )
 
-            # Add reference line at target reward (expected convergence)
+            # Add reference line at the grouping value for orientation.
             ax.axhline(
-                y=target_reward,
+                y=reference_value,
                 color="red",
                 linestyle="--",
                 linewidth=2,
                 alpha=0.8,
-                label=f"Target={target_reward}",
+                label=f"Reference={reference_value}",
             )
 
             # Plot mean Q-value trajectory with confidence interval
@@ -292,9 +292,9 @@ def plot_Qv_progress(
                     label="±1 std",
                 )
 
-                # Show final convergence error in title
-                final_error = abs(q_mean[-1] - target_reward)
-                ax.set_title(f"{title}\nFinal Error: {final_error:.3f}")
+                # Show final distance to the group reference in the title.
+                final_error = abs(q_mean[-1] - reference_value)
+                ax.set_title(f"{title}\nDistance to Ref: {final_error:.3f}")
             else:
                 ax.set_title(title)
 
@@ -314,8 +314,9 @@ def plot_Qv_progress(
         HIST_BINS = 50
         HIST_RANGE = (-1.1, 1.1)
 
-        for row, col, indices, q_history, title in plot_configs:
+        for row, col, indices, q_history, head_name, reference_value in plot_configs:
             ax = axes[row, col]  # type: ignore
+            title = f"{head_name}: {group_label}={reference_value}"
 
             if not indices:  # Skip if no samples in this group
                 ax.text(
@@ -369,6 +370,180 @@ def plot_Qv_progress(
                     ax.set_title(title)
                 ax.grid(True, alpha=0.3)
                 plt.colorbar(im, ax=ax, label="Percentage (%)")
+
+
+def plot_Qv_horizon(
+    q_place: torch.Tensor | np.ndarray,
+    q_select: torch.Tensor | np.ndarray,
+    outcome: torch.Tensor | np.ndarray,
+    steps_to_terminal: torch.Tensor | np.ndarray,
+    fig_num: int = 5,
+    DISPLAY_PLOT: bool = True,
+    position: tuple[int, int] | None = (900, 0),
+    experiment_name: str = "",
+    FREQ_EPOCH_SAVING: int = -1,
+    FOLDER_SAVE: str = "./",
+    FIG_NAME=lambda epoch: f"{datetime.now().strftime('%Y%m%d_%H%M')}-qv_horizon_{epoch:04d}.svg",
+    current_epoch: int = 0,
+    SAVEFIG_DPI: int = 1000,
+) -> None:
+    """Plot current-epoch Q-values as a function of distance to terminal state.
+
+    The plot aggregates the current batch by player-perspective outcome and
+    horizon (steps to terminal), showing how each head values states at
+    different depths from the end of the game.
+    """
+
+    def _to_numpy(values: torch.Tensor | np.ndarray) -> np.ndarray:
+        if hasattr(values, "detach"):
+            return values.detach().cpu().numpy()
+        return np.array(values)
+
+    q_place_np = _to_numpy(q_place).reshape(-1)
+    q_select_np = _to_numpy(q_select).reshape(-1)
+    outcome_np = np.rint(_to_numpy(outcome).reshape(-1)).astype(int)
+    steps_np = np.rint(_to_numpy(steps_to_terminal).reshape(-1)).astype(int)
+
+    batch_size = min(
+        q_place_np.shape[0],
+        q_select_np.shape[0],
+        outcome_np.shape[0],
+        steps_np.shape[0],
+    )
+    if batch_size == 0:
+        return
+
+    q_place_np = q_place_np[:batch_size]
+    q_select_np = q_select_np[:batch_size]
+    outcome_np = outcome_np[:batch_size]
+    steps_np = steps_np[:batch_size]
+
+    experiment_name = f"{experiment_name}-{fig_num}"
+    if plt.fignum_exists(experiment_name):
+        fig = plt.figure(experiment_name)
+        fig.clf()
+    else:
+        fig = None
+
+    if fig is None:
+        fig = plt.figure(experiment_name, figsize=(15, 9), constrained_layout=True)
+
+    if position is not None:
+        try:
+            manager = fig.canvas.manager  # type: ignore
+            manager.window.wm_geometry(f"+{position[0]}+{position[1]}")  # type: ignore
+        except:
+            pass
+
+    axes = fig.subplots(2, 1, sharex=True)
+    fig.suptitle(
+        "Q-value Horizon Profile by Player Perspective\n"
+        "Marker area scales with sample count; band = ±1 std",
+        fontsize=14,
+    )
+
+    palette = {
+        -1: {
+            "color": "#E69F00",  # orange
+            "marker": "o",
+            "label": "Outcome = -1",
+        },
+        0: {
+            "color": "#4D4D4D",  # graphite
+            "marker": "s",
+            "label": "Outcome = 0",
+        },
+        1: {
+            "color": "#009E73",  # teal-green
+            "marker": "^",
+            "label": "Outcome = +1",
+        },
+    }
+
+    head_configs = [
+        (axes[0], q_place_np, "Q_place Horizon"),
+        (axes[1], q_select_np, "Q_select Horizon"),
+    ]
+
+    finite_values = np.concatenate(
+        [q_place_np[np.isfinite(q_place_np)], q_select_np[np.isfinite(q_select_np)]]
+    )
+    if finite_values.size > 0:
+        q_min = finite_values.min()
+        q_max = finite_values.max()
+        y_pad = max(0.1, 0.05 * (q_max - q_min)) if q_max != q_min else 0.5
+        y_limits = (q_min - y_pad, q_max + y_pad)
+    else:
+        y_limits = (-1.2, 1.2)
+
+    for ax, q_values, title in head_configs:  # type: ignore
+        for outcome_value, style in palette.items():
+            outcome_mask = outcome_np == outcome_value
+            if not outcome_mask.any():
+                continue
+
+            unique_steps = np.sort(np.unique(steps_np[outcome_mask]))
+            q_mean = []
+            q_std = []
+            q_count = []
+
+            for step in unique_steps:
+                step_mask = outcome_mask & (steps_np == step)
+                step_values = q_values[step_mask]
+                q_mean.append(step_values.mean())
+                q_std.append(step_values.std())
+                q_count.append(step_values.size)
+
+            q_mean_np = np.array(q_mean)
+            q_std_np = np.array(q_std)
+            q_count_np = np.array(q_count)
+            marker_sizes = 40 + (20 * np.sqrt(q_count_np))
+
+            ax.plot(
+                unique_steps,
+                q_mean_np,
+                color=style["color"],
+                linewidth=2.5,
+                alpha=0.95,
+                label=style["label"],
+            )
+            ax.scatter(
+                unique_steps,
+                q_mean_np,
+                s=marker_sizes,
+                color=style["color"],
+                marker=style["marker"],
+                edgecolors="white",
+                linewidths=0.9,
+                zorder=10,
+            )
+            ax.fill_between(
+                unique_steps,
+                q_mean_np - q_std_np,
+                q_mean_np + q_std_np,
+                color=style["color"],
+                alpha=0.16,
+            )
+
+        ax.set_title(title)
+        ax.set_ylabel("Mean Q-value")
+        ax.set_ylim(y_limits)
+        ax.grid(True, alpha=0.35, linestyle=":")
+        ax.legend(loc="best", title="Perspective")
+
+    axes[1].set_xlabel("Steps to terminal (0 = terminal state)")
+    axes[1].set_xticks(np.sort(np.unique(steps_np)))
+
+    if current_epoch % FREQ_EPOCH_SAVING == 0 and FREQ_EPOCH_SAVING != -1:
+        plt.savefig(
+            path.join(FOLDER_SAVE, FIG_NAME(current_epoch)),
+            dpi=SAVEFIG_DPI,
+            bbox_inches="tight",
+        )
+
+    if DISPLAY_PLOT:
+        plt.draw()
+        plt.pause(0.001)
 
     # Save the figure at regular intervals
     if current_epoch % FREQ_EPOCH_SAVING == 0 and FREQ_EPOCH_SAVING != -1:

@@ -21,6 +21,7 @@ from QuartoRL import (
     plot_loss,
     plot_boards_comp,
     plot_Qv_progress,
+    plot_Qv_horizon,
 )
 from tqdm.auto import tqdm
 from pprint import pformat
@@ -169,7 +170,9 @@ win_rate: dict[str | int, list[float]] = {}  # list of win rates of epochs by ri
 q_values_history: dict[str, list] = {
     "q_place": [],
     "q_select": [],
-    "rewards": [],  # Track rewards to group Q-values by target
+    "rewards": [],  # Kept for backward compatibility with older viewers.
+    "outcome": [],  # Player-perspective winner/loser label for plotting.
+    "steps_to_terminal": [],  # Horizon metadata for Q-value horizon plots.
 }  # Track Q-values over epochs
 
 # ###########################
@@ -397,6 +400,18 @@ for e in tqdm(
         q_values_history["rewards"].append(
             reward.detach().cpu().tolist() if hasattr(reward, "detach") else reward
         )
+    if len(q_values_history["outcome"]) == 0:
+        outcome = exp["outcome"]
+        q_values_history["outcome"].append(
+            outcome.detach().cpu().tolist() if hasattr(outcome, "detach") else outcome
+        )
+    if len(q_values_history["steps_to_terminal"]) == 0:
+        steps_to_terminal = exp["steps_to_terminal"]
+        q_values_history["steps_to_terminal"].append(
+            steps_to_terminal.detach().cpu().tolist()
+            if hasattr(steps_to_terminal, "detach")
+            else steps_to_terminal
+        )
 
     loss_data["epoch_values"].append(step_i)
 
@@ -475,11 +490,25 @@ for e in tqdm(
 
         plot_Qv_progress(
             q_values_history,
-            exp["reward"],
+            exp["outcome"],
             fig_num=4,
             DISPLAY_PLOT=True,
             done_v=exp["done"],
             PLOT_TYPE=Q_PLOT_TYPE,
+            group_label="Outcome",
+            experiment_name=EXPERIMENT_NAME,
+            FREQ_EPOCH_SAVING=FREQ_EPOCH_SAVING,
+            FOLDER_SAVE=CHECKPOINT_FOLDER,
+            current_epoch=e + 1,
+        )
+
+        plot_Qv_horizon(
+            q_place,
+            q_select,
+            exp["outcome"],
+            exp["steps_to_terminal"],
+            fig_num=5,
+            DISPLAY_PLOT=True,
             experiment_name=EXPERIMENT_NAME,
             FREQ_EPOCH_SAVING=FREQ_EPOCH_SAVING,
             FOLDER_SAVE=CHECKPOINT_FOLDER,
