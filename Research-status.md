@@ -232,7 +232,7 @@ This explains why N=2 still worked (only 2 Bellman steps, limited divergence) wh
 |-----|-------------|--------|--------|
 | **Mask terminal states from Q_select loss** | Exclude states where `action_sel=-1` from Q_select loss. Similarly mask first-move from Q_place loss. | Low | **HA_mask** (in progress) |
 | **Remove tanh from Q_select** | Use unbounded Q-values (standard DQN) or clamp. Prevents gradient vanishing at ±1 boundary. | Low | Pending |
-| **Decouple transitions** | Restructure experience: separate place and select transitions with independent Bellman equations. | High | Pending |
+| **Decouple transitions** | Restructure experience: separate place and select transitions with independent Bellman equations. | High | **Implementation in progress** (`exp/decoupled-autoreg`) |
 | **Monte Carlo returns for Q_select** | Use actual game outcome as Q_select target instead of bootstrapping through the noisy Q_select head. | Medium | **LA_mcSelect** (in progress) |
 | **Asymmetric learning rates** | Higher LR or more gradient steps for Q_select to compensate for weaker signal. | Low | Pending |
 

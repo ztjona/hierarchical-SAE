@@ -9,9 +9,11 @@ from torchrl.data.replay_buffers import ReplayBuffer
 from torchrl.data.replay_buffers.storages import LazyTensorStorage
 from torchrl.data.replay_buffers.samplers import SamplerWithoutReplacement
 from bot.CNN_bot import Quarto_bot
+from bot.CNN_autoreg_bot import Quarto_bot as Quarto_autoreg_bot
 from models.CNN1 import QuartoCNN
 from models.CNN_uncoupled import QuartoCNN as QuartoCNN_uncoupled
 from models.CNN_unbound import QuartoCNN as QuartoCNN_unbound
+from models.CNN_autoreg import QuartoCNNAutoreg, QuartoCNNAutoregUnbound
 from QuartoRL import (
     gen_experience,
     run_contest,
@@ -22,6 +24,9 @@ from QuartoRL import (
     plot_boards_comp,
     plot_Qv_progress,
     plot_Qv_horizon,
+    TRANSITION_SCHEMA_JOINT,
+    TRANSITION_SCHEMA_DECOUPLED_AUTOREG,
+    DECOUPLED_TARGET_TD_PLACE_MC_SELECT,
 )
 from tqdm.auto import tqdm
 from pprint import pformat
@@ -40,6 +45,27 @@ EXPERIMENT_NAME = "LA_mcSelect"
 CHECKPOINT_FOLDER = f"./CHECKPOINTS/{EXPERIMENT_NAME}/"
 # ARCHITECTURE = QuartoCNN
 ARCHITECTURE = QuartoCNN_uncoupled
+
+TRANSITION_SCHEMA = TRANSITION_SCHEMA_JOINT  # Options: joint, decoupled_autoreg
+DECOUPLED_TARGET_STYLE = (
+    DECOUPLED_TARGET_TD_PLACE_MC_SELECT  # Planned decoupled target rule
+)
+
+# Future decoupled-autoreg alternatives:
+# ARCHITECTURE = QuartoCNNAutoreg
+# ARCHITECTURE = QuartoCNNAutoregUnbound
+
+PLAYER_BOT_CLASS = (
+    Quarto_bot if TRANSITION_SCHEMA == TRANSITION_SCHEMA_JOINT else Quarto_autoreg_bot
+)
+
+
+def estimate_steps_per_match(n_last_states: int, transition_schema: str) -> int:
+    if transition_schema == TRANSITION_SCHEMA_DECOUPLED_AUTOREG:
+        return max(1, 2 * n_last_states - 1)
+    return n_last_states
+
+
 LOSS_APPROACH = "mc_select"  # Options: "combined_avg", "only_select", "only_place", "separate_bellman", "mc_select"
 # REWARD_FUNCTION = "final"  # "final", "propagate", "discount"
 REWARD_FUNCTION = "propagate"  # "final", "propagate", "discount"
@@ -73,7 +99,9 @@ ENDGAME_FRACTION = 0  # disabled for from-scratch training
 N_LAST_STATES_ENDGAME = 2  # must match pre-trained model's training distribution
 
 # movs per match * #_matches per epoch (max 16, but avg less)
-STEPS_PER_EPOCH = N_LAST_STATES_FINAL * MATCHES_PER_EPOCH
+STEPS_PER_EPOCH = (
+    estimate_steps_per_match(N_LAST_STATES_FINAL, TRANSITION_SCHEMA) * MATCHES_PER_EPOCH
+)
 
 if GEN_EXPERIENCE_BY_EPOCH:
     # EPOCHs x STEPS_PER_EPOCH
@@ -156,6 +184,8 @@ logger.info(
 )
 logger.info(f"LOSS_APPROACH={LOSS_APPROACH}")
 logger.info(f"REWARD_FUNCTION={REWARD_FUNCTION}")
+logger.info(f"TRANSITION_SCHEMA={TRANSITION_SCHEMA}")
+logger.info(f"DECOUPLED_TARGET_STYLE={DECOUPLED_TARGET_STYLE}")
 
 # ###########################
 # Unpack baselines into rivals for evaluation
@@ -221,7 +251,11 @@ replay_buffer = ReplayBuffer(
 )
 
 # Endgame replay buffer: keeps end-game-only experience to anchor Q-values
-ENDGAME_REPLAY_SIZE = NUM_EPOCHs_BUFFER * N_LAST_STATES_ENDGAME * MATCHES_PER_EPOCH
+ENDGAME_REPLAY_SIZE = (
+    NUM_EPOCHs_BUFFER
+    * estimate_steps_per_match(N_LAST_STATES_ENDGAME, TRANSITION_SCHEMA)
+    * MATCHES_PER_EPOCH
+)
 endgame_replay_buffer = ReplayBuffer(
     storage=LazyTensorStorage(max_size=ENDGAME_REPLAY_SIZE),
     sampler=SamplerWithoutReplacement(),
@@ -253,10 +287,10 @@ for e in tqdm(
     range(EPOCHS), desc=f"{Fore.GREEN}Epochs{Style.RESET_ALL}", position=0, leave=True
 ):
     # load models
-    p1 = Quarto_bot(
+    p1 = PLAYER_BOT_CLASS(
         model=policy_net, deterministic=False, temperature=TEMPERATURE_EXPLORE
     )
-    p2 = Quarto_bot(
+    p2 = PLAYER_BOT_CLASS(
         model=policy_net, deterministic=False, temperature=TEMPERATURE_EXPLORE
     )  # self play
 
@@ -286,6 +320,7 @@ for e in tqdm(
             number_of_matches=MATCHES_PER_EPOCH,
             mode_2x2=mode_2x2,
             REWARD_FUNCTION_TYPE=REWARD_FUNCTION,
+            TRANSITION_SCHEMA=TRANSITION_SCHEMA,
             PROGRESS_MESSAGE=f"{Fore.YELLOW}Generating experience for epoch {e + 1}{Style.RESET_ALL}",
             COLLECT_BOARDS=True,
         )
@@ -299,6 +334,7 @@ for e in tqdm(
                 number_of_matches=MATCHES_PER_EPOCH,
                 mode_2x2=mode_2x2,
                 REWARD_FUNCTION_TYPE=REWARD_FUNCTION,
+                TRANSITION_SCHEMA=TRANSITION_SCHEMA,
                 PROGRESS_MESSAGE=f"{Fore.CYAN}Generating endgame experience for epoch {e + 1}{Style.RESET_ALL}",
                 COLLECT_BOARDS=False,
             )
@@ -342,8 +378,22 @@ for e in tqdm(
             exp_batch=exp_batch,  # type: ignore
             GAMMA=GAMMA,
             LOSS_APPROACH=LOSS_APPROACH,
+            TRANSITION_SCHEMA=TRANSITION_SCHEMA,
+            DECOUPLED_TARGET_STYLE=DECOUPLED_TARGET_STYLE,
         )
-        if LOSS_APPROACH in ("separate_bellman", "mc_select"):
+        if TRANSITION_SCHEMA == TRANSITION_SCHEMA_DECOUPLED_AUTOREG:
+            q_place, target_place, q_select, target_select = dqn_result  # type: ignore
+            active_losses: list[torch.Tensor] = []
+            if q_place.numel() > 0:
+                active_losses.append(loss_fcn(q_place, target_place))
+            if q_select.numel() > 0:
+                active_losses.append(loss_fcn(q_select, target_select))
+            if not active_losses:
+                raise ValueError(
+                    "Decoupled batch produced no active place/select samples."
+                )
+            loss = torch.stack(active_losses).mean()
+        elif LOSS_APPROACH in ("separate_bellman", "mc_select"):
             # Per-head losses: separate_bellman → Bellman targets both heads;
             # mc_select → Bellman for Q_place, Monte Carlo return for Q_select.
             q_place, target_place, q_select, target_select = dqn_result  # type: ignore
@@ -385,7 +435,6 @@ for e in tqdm(
             target_net.eval()  # Ensure target network stays in eval mode
 
     # ------- END OF EPOCH -------
-    # Evaluate Q-values for the experience batch
     q_place, q_select = p1.evaluate(exp)
 
     q_values_history["q_place"].append(
