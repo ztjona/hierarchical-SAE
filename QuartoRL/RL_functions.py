@@ -26,6 +26,100 @@ import numpy as np
 import pandas as pd
 
 
+TRANSITION_SCHEMA_JOINT = "joint"
+TRANSITION_SCHEMA_DECOUPLED_AUTOREG = "decoupled_autoreg"
+
+DECOUPLED_TARGET_TD_PLACE_MC_SELECT = "td_place_mc_select"
+DISCOUNT_REWARD_GAMMA = 0.8
+
+PHASE_PLACE = 0
+PHASE_SELECT = 1
+
+JOINT_TENSORDICT_KEYS = (
+    "state_board",
+    "state_piece",
+    "action_place",
+    "action_sel",
+    "reward",
+    "done",
+    "next_state_board",
+    "next_state_piece",
+    "outcome",
+    "steps_to_terminal",
+)
+
+DECOUPLED_AUTOREG_TENSORDICT_KEYS = (
+    "state_board",
+    "state_aux",
+    "phase",
+    "valid_mask",
+    "action",
+    "reward",
+    "done",
+    "next_state_board",
+    "next_state_aux",
+    "next_phase",
+    "next_valid_mask",
+    "outcome",
+    "steps_to_terminal",
+)
+
+
+def _piece_index_to_vector(piece_index: int) -> np.ndarray:
+    if piece_index == -1:
+        return np.zeros(16, dtype=np.float32)
+    vector = Board.pos_index2vector(piece_index)
+    return np.asarray(vector, dtype=np.float32)
+
+
+def _available_pieces_mask(available_pieces: set[int]) -> np.ndarray:
+    mask = np.zeros(16, dtype=np.float32)
+    if available_pieces:
+        mask[sorted(available_pieces)] = 1.0
+    return mask
+
+
+def _valid_position_mask(board_state: str) -> np.ndarray:
+    board = Board.serialized_2_board(board_state)
+    valid_moves = set(board.get_valid_moves())
+    mask = np.zeros(16, dtype=np.float32)
+    for idx in range(16):
+        if board.get_position_index(idx) in valid_moves:
+            mask[idx] = 1.0
+    return mask
+
+
+def _actor_outcome(player_pos: str, match_result: str) -> float:
+    if match_result == "Tie":
+        return 0.0
+    return 1.0 if player_pos == match_result else -1.0
+
+
+def _phase_reward(
+    *,
+    REWARD_FUNCTION_TYPE: str,
+    phase: int,
+    outcome: float,
+    done: bool,
+    steps_to_terminal: int,
+) -> float:
+    if REWARD_FUNCTION_TYPE == "final":
+        return float(outcome) if phase == PHASE_PLACE and done else 0.0
+    if REWARD_FUNCTION_TYPE == "propagate":
+        return float(outcome)
+    if REWARD_FUNCTION_TYPE == "discount":
+        return float((DISCOUNT_REWARD_GAMMA**steps_to_terminal) * outcome)
+    raise ValueError(f"Unknown REWARD_FUNCTION_TYPE {REWARD_FUNCTION_TYPE}")
+
+
+def _masked_max(q_values: torch.Tensor, valid_mask: torch.Tensor) -> torch.Tensor:
+    masked_q = q_values.masked_fill(valid_mask <= 0, float("-inf"))
+    max_values = masked_q.max(dim=1).values
+    if not torch.isfinite(max_values).all():
+        raise ValueError("Encountered a next-state row with no valid actions.")
+    return max_values
+
+
 def convert_2_state_action_reward(match_data, REWARD_FUNCTION_TYPE: str = "propagate"):
     """
     Convert match data to state, action, reward format for RL training.
@@ -204,6 +298,7 @@ def gen_experience(
     PROGRESS_MESSAGE: str = "Generating experience",
     mode_2x2: bool = False,
     REWARD_FUNCTION_TYPE: str = "propagate",
+    TRANSITION_SCHEMA: str = TRANSITION_SCHEMA_JOINT,
     COLLECT_BOARDS: bool = False,
 ) -> TensorDict | tuple[TensorDict, list[tuple[Board, Board]]]:
     """
@@ -247,6 +342,21 @@ def gen_experience(
 
     Where N is the total number of states collected (varies by matches).
     """
+    if TRANSITION_SCHEMA == TRANSITION_SCHEMA_DECOUPLED_AUTOREG:
+        return gen_experience_decoupled_autoreg(
+            p1_bot=p1_bot,
+            p2_bot=p2_bot,
+            n_last_states=n_last_states,
+            number_of_matches=number_of_matches,
+            verbose=verbose,
+            PROGRESS_MESSAGE=PROGRESS_MESSAGE,
+            mode_2x2=mode_2x2,
+            REWARD_FUNCTION_TYPE=REWARD_FUNCTION_TYPE,
+            COLLECT_BOARDS=COLLECT_BOARDS,
+        )
+    if TRANSITION_SCHEMA != TRANSITION_SCHEMA_JOINT:
+        raise ValueError(f"Unknown TRANSITION_SCHEMA {TRANSITION_SCHEMA}")
+
     logger.debug("Generating experience...")
 
     matches_data, _ = play_games(  # _ winrate
@@ -333,9 +443,7 @@ def gen_experience(
             ),  # -1 means no action
             "reward": torch.tensor(p_all["reward"].to_numpy(), dtype=torch.float32),
             "done": torch.tensor(p_all["done"].to_numpy(), dtype=torch.bool),
-            "outcome": torch.tensor(
-                p_all["outcome"].to_numpy(), dtype=torch.float32
-            ),
+            "outcome": torch.tensor(p_all["outcome"].to_numpy(), dtype=torch.float32),
             "steps_to_terminal": torch.tensor(
                 p_all["steps_to_terminal"].to_numpy(), dtype=torch.float32
             ),
@@ -349,12 +457,246 @@ def gen_experience(
         return experience
 
 
+def gen_experience_decoupled_autoreg(
+    *,
+    p1_bot: BotAI,
+    p2_bot: BotAI,
+    n_last_states: int = 16,
+    number_of_matches: int = 1000,
+    verbose: bool = False,
+    PROGRESS_MESSAGE: str = "Generating experience",
+    mode_2x2: bool = False,
+    REWARD_FUNCTION_TYPE: str = "propagate",
+    COLLECT_BOARDS: bool = False,
+):
+    """Generate phase-decoupled autoregressive transitions from move history.
+
+    Each stored row corresponds to exactly one action phase:
+      - place: board before placing + incoming piece one-hot
+      - select: board after placing + available-piece mask
+
+    ``n_last_states`` preserves the original joint-turn semantics by keeping only
+    the transitions that belong to the last N combined turn states.
+    """
+    logger.debug("Generating decoupled-autoregressive experience...")
+
+    matches_data, _ = play_games(
+        matches=number_of_matches,
+        player1=p1_bot,
+        player2=p2_bot,
+        delay=0,
+        verbose=verbose,
+        PROGRESS_MESSAGE=PROGRESS_MESSAGE,
+        save_match=False,
+        mode_2x2=mode_2x2,
+    )
+
+    rows: list[dict] = []
+    boards: list[tuple[Board, Board]] = []
+
+    for match_data in matches_data:
+        match_rows: list[dict] = []
+        move_history = match_data["move_history"]
+        match_result = match_data["result"]
+
+        current_board = "0"
+        available_pieces = set(range(16))
+        pending_piece = -1
+        joint_state_index = 0
+
+        for move_idx, move in enumerate(move_history):
+            action_type = move["action"]
+            player_pos = move["player_pos"]
+            mov_description = f"{move_idx}|{action_type}|{player_pos}"
+            outcome = _actor_outcome(player_pos, match_result)
+
+            if action_type == "selected":
+                state_board = current_board
+                state_aux = _available_pieces_mask(available_pieces)
+                valid_mask = state_aux.copy()
+                action = int(move["piece_index"])
+
+                if action not in available_pieces:
+                    raise ValueError(
+                        f"Selected piece {action} not available in storage. {mov_description}"
+                    )
+
+                available_pieces.remove(action)
+                pending_piece = action
+
+                next_state_board = current_board
+                next_state_aux = _piece_index_to_vector(pending_piece)
+                next_phase = PHASE_PLACE
+                next_valid_mask = _valid_position_mask(current_board)
+
+                match_rows.append(
+                    {
+                        "joint_state_index": joint_state_index,
+                        "mov_description": mov_description,
+                        "board_state": state_board,
+                        "board_next_state": next_state_board,
+                        "state_aux": state_aux,
+                        "valid_mask": valid_mask,
+                        "action": action,
+                        "phase": PHASE_SELECT,
+                        "done": False,
+                        "next_state_aux": next_state_aux,
+                        "next_phase": next_phase,
+                        "next_valid_mask": next_valid_mask,
+                        "outcome": outcome,
+                    }
+                )
+                joint_state_index += 1
+
+            elif action_type == "placed":
+                if pending_piece == -1:
+                    raise ValueError(
+                        f"Encountered a place action without a pending selected piece. {mov_description}"
+                    )
+
+                state_board = current_board
+                state_aux = _piece_index_to_vector(pending_piece)
+                valid_mask = _valid_position_mask(current_board)
+                action = int(move["position_index"])
+
+                next_state_board = move["board_after"]
+                current_board = next_state_board
+                done = move_idx == len(move_history) - 1
+
+                if done:
+                    next_state_aux = np.zeros(16, dtype=np.float32)
+                    next_phase = PHASE_SELECT
+                    next_valid_mask = np.zeros(16, dtype=np.float32)
+                else:
+                    next_state_aux = _available_pieces_mask(available_pieces)
+                    next_phase = PHASE_SELECT
+                    next_valid_mask = next_state_aux.copy()
+
+                match_rows.append(
+                    {
+                        "joint_state_index": joint_state_index,
+                        "mov_description": mov_description,
+                        "board_state": state_board,
+                        "board_next_state": next_state_board,
+                        "state_aux": state_aux,
+                        "valid_mask": valid_mask,
+                        "action": action,
+                        "phase": PHASE_PLACE,
+                        "done": done,
+                        "next_state_aux": next_state_aux,
+                        "next_phase": next_phase,
+                        "next_valid_mask": next_valid_mask,
+                        "outcome": outcome,
+                    }
+                )
+                pending_piece = -1
+            else:
+                raise ValueError(f"Unknown action {action_type}")
+
+        if not match_rows:
+            continue
+
+        max_joint_state_index = max(row["joint_state_index"] for row in match_rows)
+        if n_last_states <= max_joint_state_index + 1:
+            joint_cutoff = max_joint_state_index - n_last_states + 1
+            match_rows = [
+                row for row in match_rows if row["joint_state_index"] >= joint_cutoff
+            ]
+
+        total_transitions = len(match_rows)
+        for idx, row in enumerate(match_rows):
+            steps_to_terminal = total_transitions - 1 - idx
+            row["steps_to_terminal"] = steps_to_terminal
+            row["reward"] = _phase_reward(
+                REWARD_FUNCTION_TYPE=REWARD_FUNCTION_TYPE,
+                phase=row["phase"],
+                outcome=row["outcome"],
+                done=row["done"],
+                steps_to_terminal=steps_to_terminal,
+            )
+
+            if COLLECT_BOARDS:
+                boards.append(
+                    (
+                        Board.serialized_2_board(
+                            row["board_state"],
+                            name=(
+                                f"{row['mov_description']} | phase={row['phase']} | "
+                                f"R={row['reward']:.2f}"
+                            ),
+                        ),
+                        Board.serialized_2_board(
+                            row["board_next_state"],
+                            name=(
+                                f"{row['mov_description']} | next_phase={row['next_phase']} | "
+                                f"R={row['reward']:.2f}"
+                            ),
+                        ),
+                    )
+                )
+
+        rows.extend(match_rows)
+
+    if not rows:
+        raise ValueError("No decoupled-autoregressive experience was generated.")
+
+    p_all = pd.DataFrame(rows)
+
+    experience = TensorDict(
+        {
+            "state_board": torch.tensor(
+                np.stack(p_all["board_state"].apply(Board.deserialize)),
+                dtype=torch.float32,
+            ),
+            "state_aux": torch.tensor(
+                np.stack(p_all["state_aux"].to_list()),
+                dtype=torch.float32,
+            ),
+            "phase": torch.tensor(p_all["phase"].to_numpy(), dtype=torch.int64),
+            "valid_mask": torch.tensor(
+                np.stack(p_all["valid_mask"].to_list()),
+                dtype=torch.float32,
+            ),
+            "action": torch.tensor(p_all["action"].to_numpy(), dtype=torch.int64),
+            "reward": torch.tensor(p_all["reward"].to_numpy(), dtype=torch.float32),
+            "done": torch.tensor(p_all["done"].to_numpy(), dtype=torch.bool),
+            "next_state_board": torch.tensor(
+                np.stack(p_all["board_next_state"].apply(Board.deserialize)),
+                dtype=torch.float32,
+            ),
+            "next_state_aux": torch.tensor(
+                np.stack(p_all["next_state_aux"].to_list()),
+                dtype=torch.float32,
+            ),
+            "next_phase": torch.tensor(
+                p_all["next_phase"].to_numpy(), dtype=torch.int64
+            ),
+            "next_valid_mask": torch.tensor(
+                np.stack(p_all["next_valid_mask"].to_list()),
+                dtype=torch.float32,
+            ),
+            "outcome": torch.tensor(p_all["outcome"].to_numpy(), dtype=torch.float32),
+            "steps_to_terminal": torch.tensor(
+                p_all["steps_to_terminal"].to_numpy(), dtype=torch.float32
+            ),
+        },
+        batch_size=[p_all.shape[0]],
+        device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+    )
+
+    if COLLECT_BOARDS:
+        return experience, boards
+    return experience
+
+
 def DQN_training_step(
     policy_net: NN_abstract,
     target_net: NN_abstract,
     GAMMA: float,
     exp_batch: TensorDict,
     LOSS_APPROACH: str = "combined_avg",
+    TRANSITION_SCHEMA: str = TRANSITION_SCHEMA_JOINT,
+    DECOUPLED_TARGET_STYLE: str = DECOUPLED_TARGET_TD_PLACE_MC_SELECT,
 ):
     """Perform one DQN training step using the given batch of experiences.
 
@@ -370,6 +712,11 @@ def DQN_training_step(
         Batch of experiences with state, action, reward, next_state, done
     LOSS_APPROACH : str
         Approach for computing state-action values. Options are "combined_avg", "only_select", "only_place", "separate_bellman", "mc_select".
+    TRANSITION_SCHEMA : str
+        Transition layout. Options are "joint" and "decoupled_autoreg".
+    DECOUPLED_TARGET_STYLE : str
+        Planned target rule for decoupled-autoregressive training. Default is
+        place TD + select Monte Carlo.
     Returns
     -------
     For "combined_avg", "only_select", "only_place":
@@ -392,6 +739,17 @@ def DQN_training_step(
     # Ensure networks are in correct mode
     policy_net.train()
     # target_net.eval()  # Target network is always in eval mode
+
+    if TRANSITION_SCHEMA == TRANSITION_SCHEMA_DECOUPLED_AUTOREG:
+        return DQN_training_step_decoupled_autoreg(
+            policy_net=policy_net,
+            target_net=target_net,
+            GAMMA=GAMMA,
+            exp_batch=exp_batch,
+            TARGET_STYLE=DECOUPLED_TARGET_STYLE,
+        )
+    if TRANSITION_SCHEMA != TRANSITION_SCHEMA_JOINT:
+        raise ValueError(f"Unknown TRANSITION_SCHEMA {TRANSITION_SCHEMA}")
 
     # Move experience batch to the same device as the model
     device = next(policy_net.parameters()).device
@@ -583,3 +941,85 @@ def DQN_training_step(
     expected_state_action_values = exp_batch["reward"] + (next_state_values * GAMMA)
 
     return state_action_values, expected_state_action_values
+
+
+def DQN_training_step_decoupled_autoreg(
+    *,
+    policy_net: NN_abstract,
+    target_net: NN_abstract,
+    GAMMA: float,
+    exp_batch: TensorDict,
+    TARGET_STYLE: str = DECOUPLED_TARGET_TD_PLACE_MC_SELECT,
+):
+    """Compute masked per-phase targets for decoupled-autoregressive batches.
+
+    Current target style:
+      - place transitions: TD/Bellman bootstrap into the next select phase
+      - select transitions: Monte Carlo outcome supervision
+    """
+    if TARGET_STYLE != DECOUPLED_TARGET_TD_PLACE_MC_SELECT:
+        raise ValueError(f"Unknown decoupled target style {TARGET_STYLE}")
+
+    q_values_phase = getattr(policy_net, "q_values_phase", None)
+    target_q_values_phase = getattr(target_net, "q_values_phase", None)
+    if q_values_phase is None or not callable(q_values_phase):
+        raise TypeError(
+            "Decoupled-autoreg training requires policy_net.q_values_phase(x_board, x_aux, phase)."
+        )
+    if target_q_values_phase is None or not callable(target_q_values_phase):
+        raise TypeError(
+            "Decoupled-autoreg training requires target_net.q_values_phase(x_board, x_aux, phase)."
+        )
+
+    device = next(policy_net.parameters()).device
+    exp_batch = exp_batch.to(device)
+
+    phase = exp_batch["phase"].to(torch.int64)
+    action = exp_batch["action"].to(torch.int64)
+    valid_mask = exp_batch["valid_mask"]
+    place_mask = phase == PHASE_PLACE
+    select_mask = phase == PHASE_SELECT
+
+    action_validity = valid_mask.gather(1, action.unsqueeze(1)).squeeze(1)
+    if not (action_validity > 0).all():
+        raise ValueError(
+            "Encountered a decoupled transition with an invalid chosen action."
+        )
+
+    q_place_all, q_select_all = policy_net(
+        exp_batch["state_board"],
+        exp_batch["state_aux"],
+        phase=phase,
+    )
+
+    state_place_values = (
+        q_place_all[place_mask].gather(1, action[place_mask].unsqueeze(1)).squeeze(1)
+    )
+    state_select_values = (
+        q_select_all[select_mask].gather(1, action[select_mask].unsqueeze(1)).squeeze(1)
+    )
+
+    expected_place = exp_batch["reward"][place_mask].clone()
+    if place_mask.any():
+        non_terminal_place_mask = place_mask & ~exp_batch["done"]
+        if non_terminal_place_mask.any():
+            with torch.no_grad():
+                next_q_values = target_q_values_phase(
+                    exp_batch["next_state_board"][non_terminal_place_mask],
+                    exp_batch["next_state_aux"][non_terminal_place_mask],
+                    exp_batch["next_phase"][non_terminal_place_mask],
+                )
+                next_valid = exp_batch["next_valid_mask"][non_terminal_place_mask]
+                next_place_values = _masked_max(next_q_values, next_valid)
+            expected_place[~exp_batch["done"][place_mask]] += GAMMA * next_place_values
+
+    expected_select = (
+        GAMMA ** exp_batch["steps_to_terminal"][select_mask]
+    ) * exp_batch["outcome"][select_mask]
+
+    return (
+        state_place_values,
+        expected_place,
+        state_select_values,
+        expected_select,
+    )

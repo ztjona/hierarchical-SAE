@@ -243,7 +243,9 @@ def plot_Qv_progress(
             # Plot individual Q-value trajectories
             q_values_all = []  # Collect all Q-values for computing mean
             for i in indices:
-                q_sample = [q[i].item() for q in q_history]
+                q_sample = np.array([q[i].item() for q in q_history], dtype=float)
+                if not np.isfinite(q_sample).any():
+                    continue
                 q_values_all.append(q_sample)
                 is_terminal = done_v[i].item() if done_v is not None else False
                 ax.plot(
@@ -268,35 +270,39 @@ def plot_Qv_progress(
             # Plot mean Q-value trajectory with confidence interval
             if q_values_all:
                 q_array = np.array(q_values_all)  # shape: (n_samples, n_epochs)
-                q_mean = np.mean(q_array, axis=0)
-                q_std = np.std(q_array, axis=0)
+                q_mean = np.nanmean(q_array, axis=0)
+                q_std = np.nanstd(q_array, axis=0)
+                finite_mean_mask = np.isfinite(q_mean)
 
-                # Mean line
-                ax.plot(
-                    epochs,
-                    q_mean,
-                    "b-",
-                    linewidth=3,
-                    alpha=0.9,
-                    label=f"Mean Q",
-                    zorder=10,
-                )
+                if finite_mean_mask.any():
+                    # Mean line
+                    ax.plot(
+                        epochs,
+                        q_mean,
+                        "b-",
+                        linewidth=3,
+                        alpha=0.9,
+                        label=f"Mean Q",
+                        zorder=10,
+                    )
 
-                # Confidence interval (±1 std)
-                ax.fill_between(
-                    epochs,
-                    q_mean - q_std,
-                    q_mean + q_std,
-                    alpha=0.2,
-                    color="blue",
-                    label="±1 std",
-                )
+                    # Confidence interval (±1 std)
+                    ax.fill_between(
+                        epochs,
+                        q_mean - q_std,
+                        q_mean + q_std,
+                        alpha=0.2,
+                        color="blue",
+                        label="±1 std",
+                    )
 
-                # Show final distance to the group reference in the title.
-                final_error = abs(q_mean[-1] - reference_value)
-                ax.set_title(f"{title}\nDistance to Ref: {final_error:.3f}")
+                    last_finite_idx = np.where(finite_mean_mask)[0][-1]
+                    final_error = abs(q_mean[last_finite_idx] - reference_value)
+                    ax.set_title(f"{title}\nDistance to Ref: {final_error:.3f}")
+                else:
+                    ax.set_title(f"{title}\nNo active {head_name} samples")
             else:
-                ax.set_title(title)
+                ax.set_title(f"{title}\nNo active {head_name} samples")
 
             # Only show x-label on bottom row
             if row == 1:
@@ -342,6 +348,7 @@ def plot_Qv_progress(
                     else np.array(q_epoch)
                 )
                 q_subset = q_epoch_arr[indices].flatten()
+                q_subset = q_subset[np.isfinite(q_subset)]
                 hist, _ = np.histogram(q_subset, bins=HIST_BINS, range=HIST_RANGE)
                 # Normalize to percentage
                 hist_percent = (hist / hist.sum()) * 100 if hist.sum() > 0 else hist
@@ -483,6 +490,7 @@ def plot_Qv_horizon(
                 continue
 
             unique_steps = np.sort(np.unique(steps_np[outcome_mask]))
+            plotted_steps = []
             q_mean = []
             q_std = []
             q_count = []
@@ -490,10 +498,18 @@ def plot_Qv_horizon(
             for step in unique_steps:
                 step_mask = outcome_mask & (steps_np == step)
                 step_values = q_values[step_mask]
+                step_values = step_values[np.isfinite(step_values)]
+                if step_values.size == 0:
+                    continue
+                plotted_steps.append(step)
                 q_mean.append(step_values.mean())
                 q_std.append(step_values.std())
                 q_count.append(step_values.size)
 
+            if not q_mean:
+                continue
+
+            unique_steps = np.array(plotted_steps)
             q_mean_np = np.array(q_mean)
             q_std_np = np.array(q_std)
             q_count_np = np.array(q_count)
