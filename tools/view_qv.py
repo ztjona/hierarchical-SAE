@@ -11,9 +11,9 @@ Examples:
     python tools/view_qv.py Ab_data 3
 
 Notes:
-    - Default plot type is qv (Q-value histogram only).
+    - Default plot type is qv (traditional Q-value histogram + horizon plot when metadata is available).
     - If variation_num is omitted, plots are generated for all matching experiment variations.
-    - plot_type can be: qv, wr, loss, all.
+    - plot_type can be: qv, horizon, wr, loss, all.
 
 If you don't know the exact folder name, run without arguments to list available experiments.
 """
@@ -29,7 +29,7 @@ import matplotlib.pyplot as plt
 
 # Add project root to path
 sys.path.insert(0, path.join(path.dirname(__file__), ".."))
-from QuartoRL import plot_Qv_progress, plot_win_rate, plot_loss
+from QuartoRL import plot_Qv_progress, plot_Qv_horizon, plot_win_rate, plot_loss
 
 
 class CPUUnpickler(pickle.Unpickler):
@@ -134,7 +134,7 @@ def main():
     exp_name = sys.argv[1]
     var_num = None
 
-    # Optional: which plots to show (default: qv histogram only)
+    # Optional: which plots to show (default: qv histogram + horizon if available)
     show_plots = "qv"
     if len(sys.argv) > 2:
         if sys.argv[2].isdigit():
@@ -182,18 +182,21 @@ def main():
         print(f"  Loss points: {len(loss_data.get('loss_values', []))}")
         print(f"  Win rate rivals: {list(win_rate.keys())}")
 
+        outcome = qh["outcome"][0] if qh.get("outcome") else None
         rewards = qh["rewards"][0] if qh.get("rewards") else None
-        if rewards is None:
-            print("No reward data stored — cannot plot Q-value progress.")
+        group_values = outcome if outcome is not None else rewards
+        if group_values is None:
+            print("No grouping data stored — cannot plot Q-value progress.")
             continue
 
         if show_plots in ("all", "qv"):
             plot_Qv_progress(
                 qh,
-                rewards,
+                group_values,
                 fig_num=4,
                 DISPLAY_PLOT=True,
                 PLOT_TYPE="hist",
+                group_label="Outcome" if outcome is not None else "Reward",
                 experiment_name=full_name,
                 middle_column_title=experiment_middle_title(full_name),
                 FREQ_EPOCH_SAVING=1,
@@ -202,6 +205,31 @@ def main():
                 current_epoch=1,
                 SAVEFIG_DPI=VIEW_DPI,
             )
+
+        if show_plots in ("all", "qv", "horizon"):
+            steps_to_terminal = (
+                qh["steps_to_terminal"][0] if qh.get("steps_to_terminal") else None
+            )
+            if outcome is not None and steps_to_terminal is not None:
+                plot_Qv_horizon(
+                    qh["q_place"][-1],
+                    qh["q_select"][-1],
+                    outcome,
+                    steps_to_terminal,
+                    fig_num=5,
+                    DISPLAY_PLOT=True,
+                    experiment_name=full_name,
+                    FREQ_EPOCH_SAVING=1,
+                    FOLDER_SAVE=results_dir,
+                    FIG_NAME=lambda epoch: f"{full_name}_qv_horizon.png",
+                    current_epoch=1,
+                    SAVEFIG_DPI=VIEW_DPI,
+                )
+            else:
+                print(
+                    "  Horizon metadata missing in this pickle "
+                    "(needs outcome + steps_to_terminal). Skipping horizon plot."
+                )
 
         if show_plots in ("all", "wr"):
             plot_win_rate(
