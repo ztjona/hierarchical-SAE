@@ -47,8 +47,10 @@ from tqdm import tqdm
 # PARAM_NAME = "N_LAST_STATES_INIT"
 # EXPERIMENT_NAME = "JA_final"
 # PARAM_NAME = "N_LAST_STATES_INIT"
+# EXPERIMENT_NAME = "KA_coupled"
+# PARAM_NAME = "N_LAST_STATES_INIT"
 
-EXPERIMENT_NAME = "KA_coupled"
+EXPERIMENT_NAME = "LA_mcSelect"
 PARAM_NAME = "N_LAST_STATES_INIT"
 
 # BASELINEs: Include specific runs from previous experiments as reference points
@@ -67,7 +69,7 @@ BASELINEs = [
     {"Aa_replay": [8, 1024]},
     {"Ab_data": [8]},
     # {"Ab_data": [4, 8, 12]},
-    # {"JA_final": [2,3,4,6,12,16]}
+    {"JA_final": [3]},
 ]
 # BASELINEs = []  # Disable baselines
 
