@@ -23,6 +23,29 @@ from datetime import datetime
 from os import path
 
 
+def _save_and_draw(
+    fig,
+    *,
+    DISPLAY_PLOT: bool,
+    FREQ_EPOCH_SAVING: int,
+    FOLDER_SAVE: str,
+    FIG_NAME,
+    current_epoch: int,
+    SAVEFIG_DPI: int,
+) -> None:
+    """Persist the intended figure and refresh the interactive window."""
+    if FREQ_EPOCH_SAVING not in (-1, 0) and current_epoch % FREQ_EPOCH_SAVING == 0:
+        fig.savefig(
+            path.join(FOLDER_SAVE, FIG_NAME(current_epoch)),
+            dpi=SAVEFIG_DPI,
+            bbox_inches="tight",
+        )
+
+    if DISPLAY_PLOT:
+        plt.draw()
+        plt.pause(0.001)
+
+
 def plot_boards_comp(
     *boards_pair: tuple[Board, Board],
     q_place: torch.Tensor,
@@ -102,17 +125,15 @@ def plot_boards_comp(
         b1.plot(title=b1.name, ax=axes[0, i], show=False)  # type: ignore
         b2.plot(title=b2.name, ax=axes[1, i], show=False)  # type: ignore
 
-    # Save the figure at regular intervals
-    if current_epoch % FREQ_EPOCH_SAVING == 0 and FREQ_EPOCH_SAVING != -1:
-        plt.savefig(
-            path.join(FOLDER_SAVE, FIG_NAME(current_epoch)),
-            dpi=SAVEFIG_DPI,
-            bbox_inches="tight",
-        )
-
-    if DISPLAY_PLOT:
-        plt.draw()
-        plt.pause(0.001)
+    _save_and_draw(
+        fig,
+        DISPLAY_PLOT=DISPLAY_PLOT,
+        FREQ_EPOCH_SAVING=FREQ_EPOCH_SAVING,
+        FOLDER_SAVE=FOLDER_SAVE,
+        FIG_NAME=FIG_NAME,
+        current_epoch=current_epoch,
+        SAVEFIG_DPI=SAVEFIG_DPI,
+    )
 
 
 def plot_Qv_progress(
@@ -378,6 +399,16 @@ def plot_Qv_progress(
                 ax.grid(True, alpha=0.3)
                 plt.colorbar(im, ax=ax, label="Percentage (%)")
 
+    _save_and_draw(
+        fig,
+        DISPLAY_PLOT=DISPLAY_PLOT,
+        FREQ_EPOCH_SAVING=FREQ_EPOCH_SAVING,
+        FOLDER_SAVE=FOLDER_SAVE,
+        FIG_NAME=FIG_NAME,
+        current_epoch=current_epoch,
+        SAVEFIG_DPI=SAVEFIG_DPI,
+    )
+
 
 def plot_Qv_horizon(
     q_place: torch.Tensor | np.ndarray,
@@ -394,11 +425,13 @@ def plot_Qv_horizon(
     current_epoch: int = 0,
     SAVEFIG_DPI: int = 1000,
 ) -> None:
-    """Plot current-epoch Q-values as a function of distance to terminal state.
+    """Plot taken-action Q-value distributions by exact distance to terminal.
 
-    The plot aggregates the current batch by player-perspective outcome and
-    horizon (steps to terminal), showing how each head values states at
-    different depths from the end of the game.
+    Each panel contains the distribution of the stored taken-action Q-values for
+    one head and one player-perspective outcome. Columns on the x-axis are exact
+    ``steps_to_terminal`` buckets, so each vertical slice answers: among states
+    exactly ``n`` steps from termination, how are the taken-action Q-values
+    distributed?
     """
 
     def _to_numpy(values: torch.Tensor | np.ndarray) -> np.ndarray:
@@ -442,133 +475,125 @@ def plot_Qv_horizon(
         except:
             pass
 
-    axes = fig.subplots(2, 1, sharex=True)
+    # sharey=True but NOT sharex: Q_place and Q_select can have different step
+    # ranges for the same outcome column (e.g. Q_select excludes step=0), so
+    # sharing x would let the second ax.set_xlim overwrite the first and clip data.
+    axes = np.asarray(fig.subplots(2, 3, sharex=False, sharey=True))
     fig.suptitle(
-        "Q-value Horizon Profile by Player Perspective\n"
-        "Marker area scales with sample count; band = ±1 std",
+        "Taken-Action Q-value Distributions by Horizon\n"
+        "Each column is an exact steps-to-terminal bucket; colors sum to 100% within each step",
         fontsize=14,
     )
 
-    palette = {
-        -1: {
-            "color": "#E69F00",  # orange
-            "marker": "o",
-            "label": "Outcome = -1",
-        },
-        0: {
-            "color": "#4D4D4D",  # graphite
-            "marker": "s",
-            "label": "Outcome = 0",
-        },
-        1: {
-            "color": "#009E73",  # teal-green
-            "marker": "^",
-            "label": "Outcome = +1",
-        },
-    }
+    # Fixed y-axis so all panels share the same scale as Q-value bounds.
+    hist_range = (-1.0, 1.0)
 
-    head_configs = [
-        (axes[0], q_place_np, "Q_place Horizon"),
-        (axes[1], q_select_np, "Q_select Horizon"),
+    outcome_columns = [(-1, "Outcome = -1"), (0, "Outcome = 0"), (1, "Outcome = +1")]
+    hist_bins = 50
+    head_rows = [
+        ("Q_place", q_place_np),
+        ("Q_select", q_select_np),
     ]
+    heatmap_artist = None
 
-    finite_values = np.concatenate(
-        [q_place_np[np.isfinite(q_place_np)], q_select_np[np.isfinite(q_select_np)]]
-    )
-    if finite_values.size > 0:
-        q_min = finite_values.min()
-        q_max = finite_values.max()
-        y_pad = max(0.1, 0.05 * (q_max - q_min)) if q_max != q_min else 0.5
-        y_limits = (q_min - y_pad, q_max + y_pad)
-    else:
-        y_limits = (-1.2, 1.2)
+    for row, (head_name, q_values) in enumerate(head_rows):
+        for col, (outcome_value, title) in enumerate(outcome_columns):
+            ax = axes[row, col]
+            mask = outcome_np == outcome_value
+            if head_name == "Q_select":
+                # step=0 is the terminal placement — no piece selection follows,
+                # so Q_select is undefined there. Exclude it entirely.
+                mask &= steps_np > 0
+            # Active steps for this exact (head, outcome) combination.
+            _active = steps_np[mask]
+            subplot_steps = (
+                np.sort(np.unique(_active.astype(int)))
+                if _active.size > 0
+                else np.array([], dtype=int)
+            )
 
-    for ax, q_values, title in head_configs:  # type: ignore
-        for outcome_value, style in palette.items():
-            outcome_mask = outcome_np == outcome_value
-            if not outcome_mask.any():
-                continue
+            n_steps = max(subplot_steps.size, 1)
+            hist_matrix = np.zeros((hist_bins, n_steps), dtype=float)
+            mean_curve = np.full(n_steps, np.nan, dtype=float)
+            has_valid_samples = False
 
-            unique_steps = np.sort(np.unique(steps_np[outcome_mask]))
-            plotted_steps = []
-            q_mean = []
-            q_std = []
-            q_count = []
-
-            for step in unique_steps:
-                step_mask = outcome_mask & (steps_np == step)
-                step_values = q_values[step_mask]
+            for step_idx, step in enumerate(subplot_steps):
+                step_values = q_values[mask & (steps_np == step)]
                 step_values = step_values[np.isfinite(step_values)]
                 if step_values.size == 0:
                     continue
-                plotted_steps.append(step)
-                q_mean.append(step_values.mean())
-                q_std.append(step_values.std())
-                q_count.append(step_values.size)
 
-            if not q_mean:
-                continue
+                has_valid_samples = True
+                hist, _ = np.histogram(
+                    step_values,
+                    bins=hist_bins,
+                    range=hist_range,
+                )
+                hist_matrix[:, step_idx] = (hist / hist.sum()) * 100
+                mean_curve[step_idx] = step_values.mean()
 
-            unique_steps = np.array(plotted_steps)
-            q_mean_np = np.array(q_mean)
-            q_std_np = np.array(q_std)
-            q_count_np = np.array(q_count)
-            marker_sizes = 40 + (20 * np.sqrt(q_count_np))
+            if has_valid_samples:
+                heatmap_artist = ax.imshow(
+                    hist_matrix,
+                    aspect="auto",
+                    origin="lower",
+                    cmap="summer",
+                    interpolation="nearest",
+                    extent=[
+                        subplot_steps[0] - 0.5,
+                        subplot_steps[-1] + 0.5,
+                        hist_range[0],
+                        hist_range[1],
+                    ],
+                    vmin=0,
+                    vmax=100,
+                )
+                # if np.isfinite(mean_curve).any():
+                #     ax.plot(
+                #         subplot_steps,
+                #         mean_curve,
+                #         color="white",
+                #         linewidth=1.6,
+                #         alpha=0.9,
+                #     )
+            else:
+                ax.text(
+                    0.5,
+                    0.5,
+                    "No valid samples",
+                    ha="center",
+                    va="center",
+                    transform=ax.transAxes,
+                )
 
-            ax.plot(
-                unique_steps,
-                q_mean_np,
-                color=style["color"],
-                linewidth=2.5,
-                alpha=0.95,
-                label=style["label"],
-            )
-            ax.scatter(
-                unique_steps,
-                q_mean_np,
-                s=marker_sizes,
-                color=style["color"],
-                marker=style["marker"],
-                edgecolors="white",
-                linewidths=0.9,
-                zorder=10,
-            )
-            ax.fill_between(
-                unique_steps,
-                q_mean_np - q_std_np,
-                q_mean_np + q_std_np,
-                color=style["color"],
-                alpha=0.16,
-            )
+            if row == 0:
+                ax.set_title(title)
+            if col == 0:
+                ax.set_ylabel(f"{head_name}\nTaken-action Q-value")
+            if row == 1:
+                ax.set_xlabel("Steps to terminal  (0 = last move)")
 
-        ax.set_title(title)
-        ax.set_ylabel("Mean Q-value")
-        ax.set_ylim(y_limits)
-        ax.grid(True, alpha=0.35, linestyle=":")
-        ax.legend(loc="best", title="Perspective")
+            if subplot_steps.size > 0:
+                ax.set_xticks(subplot_steps)
+                ax.set_xlim(subplot_steps[0] - 0.5, subplot_steps[-1] + 0.5)
+            ax.set_ylim(-1, 1)
+            ax.invert_xaxis()
+            ax.grid(True, alpha=0.2, linestyle=":")
 
-    axes[1].set_xlabel("Steps to terminal (0 = terminal state)")
-    axes[1].set_xticks(np.sort(np.unique(steps_np)))
-
-    if current_epoch % FREQ_EPOCH_SAVING == 0 and FREQ_EPOCH_SAVING != -1:
-        plt.savefig(
-            path.join(FOLDER_SAVE, FIG_NAME(current_epoch)),
-            dpi=SAVEFIG_DPI,
-            bbox_inches="tight",
+    if heatmap_artist is not None:
+        fig.colorbar(
+            heatmap_artist,
+            ax=axes.ravel().tolist(),
+            label="Within-step share (%)",
+            shrink=0.96,
         )
 
-    if DISPLAY_PLOT:
-        plt.draw()
-        plt.pause(0.001)
-
-    # Save the figure at regular intervals
-    if current_epoch % FREQ_EPOCH_SAVING == 0 and FREQ_EPOCH_SAVING != -1:
-        plt.savefig(
-            path.join(FOLDER_SAVE, FIG_NAME(current_epoch)),
-            dpi=SAVEFIG_DPI,
-            bbox_inches="tight",
-        )
-
-    if DISPLAY_PLOT:
-        plt.draw()
-        plt.pause(0.001)
+    _save_and_draw(
+        fig,
+        DISPLAY_PLOT=DISPLAY_PLOT,
+        FREQ_EPOCH_SAVING=FREQ_EPOCH_SAVING,
+        FOLDER_SAVE=FOLDER_SAVE,
+        FIG_NAME=FIG_NAME,
+        current_epoch=current_epoch,
+        SAVEFIG_DPI=SAVEFIG_DPI,
+    )

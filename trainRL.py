@@ -24,9 +24,6 @@ from QuartoRL import (
     plot_boards_comp,
     plot_Qv_progress,
     plot_Qv_horizon,
-    TRANSITION_SCHEMA_JOINT,
-    TRANSITION_SCHEMA_DECOUPLED_AUTOREG,
-    DECOUPLED_TARGET_TD_PLACE_MC_SELECT,
 )
 from tqdm.auto import tqdm
 from pprint import pformat
@@ -43,25 +40,25 @@ logger.info("Imports done.")
 STARTING_NET = None  # Set to None to start with random weights
 EXPERIMENT_NAME = "LA_mcSelect"
 CHECKPOINT_FOLDER = f"./CHECKPOINTS/{EXPERIMENT_NAME}/"
-# ARCHITECTURE = QuartoCNN
+# TRANSITION_SCHEMA options: "joint" or "decoupled_autoreg"
+# Architecture, bot, and schema must be changed together:
+#   "joint"             → QuartoCNN / QuartoCNN_uncoupled / QuartoCNN_unbound  +  Quarto_bot
+#   "decoupled_autoreg" → QuartoCNNAutoreg / QuartoCNNAutoregUnbound           +  Quarto_autoreg_bot
+TRANSITION_SCHEMA = "decoupled_autoreg"
 ARCHITECTURE = QuartoCNN_uncoupled
+PLAYER_BOT_CLASS = Quarto_bot
+# ARCHITECTURE = QuartoCNNAutoreg       # ← use with decoupled_autoreg
+# PLAYER_BOT_CLASS = Quarto_autoreg_bot  # ← use with decoupled_autoreg
+# ARCHITECTURE = QuartoCNN              # ← other joint alternatives
+# ARCHITECTURE = QuartoCNN_unbound
 
-TRANSITION_SCHEMA = TRANSITION_SCHEMA_JOINT  # Options: joint, decoupled_autoreg
-DECOUPLED_TARGET_STYLE = (
-    DECOUPLED_TARGET_TD_PLACE_MC_SELECT  # Planned decoupled target rule
-)
-
-# Future decoupled-autoreg alternatives:
-# ARCHITECTURE = QuartoCNNAutoreg
-# ARCHITECTURE = QuartoCNNAutoregUnbound
-
-PLAYER_BOT_CLASS = (
-    Quarto_bot if TRANSITION_SCHEMA == TRANSITION_SCHEMA_JOINT else Quarto_autoreg_bot
-)
+# Only used when TRANSITION_SCHEMA = "decoupled_autoreg". Currently only one option is
+# implemented: place uses TD/Bellman, select uses Monte Carlo return.
+DECOUPLED_TARGET_STYLE = "td_place_mc_select"  # Options: "td_place_mc_select"
 
 
 def estimate_steps_per_match(n_last_states: int, transition_schema: str) -> int:
-    if transition_schema == TRANSITION_SCHEMA_DECOUPLED_AUTOREG:
+    if transition_schema == "decoupled_autoreg":
         return max(1, 2 * n_last_states - 1)
     return n_last_states
 
@@ -381,7 +378,7 @@ for e in tqdm(
             TRANSITION_SCHEMA=TRANSITION_SCHEMA,
             DECOUPLED_TARGET_STYLE=DECOUPLED_TARGET_STYLE,
         )
-        if TRANSITION_SCHEMA == TRANSITION_SCHEMA_DECOUPLED_AUTOREG:
+        if TRANSITION_SCHEMA == "decoupled_autoreg":
             q_place, target_place, q_select, target_select = dqn_result  # type: ignore
             active_losses: list[torch.Tensor] = []
             if q_place.numel() > 0:
