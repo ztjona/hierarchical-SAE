@@ -51,6 +51,7 @@ from tqdm import tqdm
 # PARAM_NAME = "N_LAST_STATES_INIT"
 
 EXPERIMENT_NAME = "LA_mcSelect"
+EXPERIMENT_NAME = "LB_mcSelect"
 PARAM_NAME = "N_LAST_STATES_INIT"
 
 # BASELINEs: Include specific runs from previous experiments as reference points
@@ -65,11 +66,13 @@ BASELINEs = [
     # {"B02replicate": [5e-4]}, # 10k epochs instead of 5k
     # {"B02replicate": [1e-3, 5e-4]},
     # {"B03_verLR": [7e-4, 2e-3]},
-    {"B03_verLR": [2e-3]},
-    {"Aa_replay": [8, 1024]},
-    {"Ab_data": [8]},
+    # {"B03_verLR": [2e-3]},
+    # {"Aa_replay": [8, 1024]},
+    # {"Ab_data": [8]},
     # {"Ab_data": [4, 8, 12]},
-    {"JA_final": [3]},
+    # {"Aa_replay": [8]},
+    # {"JA_final": [3]},
+    {"LA_mcSelect": [2, 3, 4, 6, 12, 16]},
 ]
 # BASELINEs = []  # Disable baselines
 
@@ -400,7 +403,7 @@ def _compute_run_metrics(data, tail_fraction=0.1, peak_window=100):
 
     if len(loss_vals) > 0:
         tail = max(1, int(len(loss_vals) * tail_fraction))
-        final_loss = float(np.mean(loss_vals[-tail:]))
+        final_loss = float(np.mean(loss_vals[-tail:]))  # type: ignore
     else:
         final_loss = float("nan")
 
@@ -411,13 +414,13 @@ def _compute_run_metrics(data, tail_fraction=0.1, peak_window=100):
             final_wrs[rival] = peak_wrs[rival] = None
             continue
         tail_e = max(1, int(len(wr) * tail_fraction))
-        final_wrs[rival] = float(np.mean(wr[-tail_e:]))
+        final_wrs[rival] = float(np.mean(wr[-tail_e:]))  # type: ignore
         win = min(peak_window, len(wr))
         if win > 1 and len(wr) >= win:
-            smoothed = np.convolve(wr, np.ones(win) / win, mode="valid")
+            smoothed = np.convolve(wr, np.ones(win) / win, mode="valid")  # type: ignore
             peak_wrs[rival] = float(smoothed.max())
         else:
-            peak_wrs[rival] = float(np.max(wr))
+            peak_wrs[rival] = float(np.max(wr))  # type: ignore
 
     return {
         "n_epochs": n_epochs,
@@ -558,7 +561,7 @@ def plot_losses(all_data, folders):
         # Apply smoothing
         if len(loss_values) > smoothing_window:
             smoothed = np.convolve(
-                loss_values, np.ones(smoothing_window) / smoothing_window, mode="valid"
+                loss_values, np.ones(smoothing_window) / smoothing_window, mode="valid"  # type: ignore
             )
         else:
             smoothed = loss_values
@@ -568,7 +571,7 @@ def plot_losses(all_data, folders):
         if len(epoch_boundaries) > 0:
             iter_indices = np.arange(len(smoothed))
             # searchsorted: for each iteration, find which epoch it belongs to
-            x_values = np.searchsorted(epoch_boundaries, iter_indices, side="left")
+            x_values = np.searchsorted(epoch_boundaries, iter_indices, side="left")  # type: ignore
         else:
             x_values = list(range(len(smoothed)))
 
@@ -658,10 +661,10 @@ def plot_win_rates(all_data, folders):
                 # Apply smoothing to win rates
                 if len(win_rates) > smoothing_window:
                     smoothed_wr = np.convolve(
-                        win_rates,
+                        win_rates,  # type: ignore
                         np.ones(smoothing_window) / smoothing_window,
                         mode="valid",
-                    )
+                    )  # type: ignore
                     epochs = list(range(len(smoothed_wr)))
                 else:
                     smoothed_wr = win_rates
@@ -689,8 +692,8 @@ def plot_win_rates(all_data, folders):
             line_dash="dash",
             line_color="gray",
             opacity=0.5,
-            row=1,
-            col=rival_idx + 1,
+            row=1,  # type: ignore
+            col=rival_idx + 1,  # type: ignore
         )
 
     fig.update_layout(
