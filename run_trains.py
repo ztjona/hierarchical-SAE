@@ -56,7 +56,7 @@ from datetime import datetime
 # PARAM_ITERATE = "N_LAST_STATES_INIT"
 # PARAMS = [2, 3, 4, 6, 12, 16]
 
-EXPERIMENT_NAME = "LA_mcSelect"
+EXPERIMENT_NAME = "MA_autoregresive"
 PARAM_ITERATE = "N_LAST_STATES_INIT"
 PARAMS = [2, 3, 4, 6, 12, 16]
 
