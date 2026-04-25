@@ -21,6 +21,7 @@ from QuartoRL import (
     DQN_training_step,
     plot_win_rate,
     plot_loss,
+    plot_grad_norm,
     plot_boards_comp,
     plot_Qv_progress,
     plot_Qv_horizon,
@@ -38,15 +39,15 @@ logger.info("Imports done.")
 
 # STARTING_NET = "CHECKPOINTS\\Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8\\20260227_1103-Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8_E_5000.pt"
 STARTING_NET = None  # Set to None to start with random weights
-EXPERIMENT_NAME = "LA_mcSelect"
+EXPERIMENT_NAME = "Z_tempRegresive"
 CHECKPOINT_FOLDER = f"./CHECKPOINTS/{EXPERIMENT_NAME}/"
 # TRANSITION_SCHEMA options: "joint" or "decoupled_autoreg"
 # Architecture, bot, and schema must be changed together:
 #   "joint"             → QuartoCNN / QuartoCNN_uncoupled / QuartoCNN_unbound  +  Quarto_bot
 #   "decoupled_autoreg" → QuartoCNNAutoreg / QuartoCNNAutoregUnbound           +  Quarto_autoreg_bot
 TRANSITION_SCHEMA = "decoupled_autoreg"
-ARCHITECTURE = QuartoCNN_uncoupled
-PLAYER_BOT_CLASS = Quarto_bot
+ARCHITECTURE = QuartoCNNAutoreg
+PLAYER_BOT_CLASS = Quarto_autoreg_bot
 # ARCHITECTURE = QuartoCNNAutoreg       # ← use with decoupled_autoreg
 # PLAYER_BOT_CLASS = Quarto_autoreg_bot  # ← use with decoupled_autoreg
 # ARCHITECTURE = QuartoCNN              # ← other joint alternatives
@@ -118,13 +119,13 @@ TEMPERATURE_EXPLORE = 2  # view test of temperature
 # temperature for exploitation, lower values lead to more exploitation
 TEMPERATURE_EXPLOIT = 0.1
 
-FREQ_EPOCH_SAVING = 500  # save model, figures every n epochs
-CHECKPOINT_FREQ = 50  # save model weights every n epochs; final epoch is always saved
+FREQ_EPOCH_SAVING = 30  # save model, figures every n epochs
+CHECKPOINT_FREQ = 30  # save model weights every n epochs; final epoch is always saved
 
 
 # Plots are shown every epoch until this number of epochs. After that, only every
 # FREQ_EPOCH_PLOT_SHOW epochs. At the end, all plots are shown again.
-FREQ_EPOCH_PLOT_SHOW = 500  # efectivelty disable
+FREQ_EPOCH_PLOT_SHOW = 10  # efectivelty disable
 
 # in iters if >= N_ITERS show epoch lines in loss plot
 SMOOTHING_WINDOW = 10
@@ -271,6 +272,10 @@ loss_data: dict[str, list[float | int]] = {
     "loss_values": [],
     "epoch_values": [],  # iter value at the end of each epoch
 }  # to track loss values during training
+grad_norm_data: dict[str, list[float | int]] = {
+    "grad_norm_values": [],  # pre-clip total grad norm per training step
+    "epoch_values": [],  # iter value at the end of each epoch (parallel to loss_data)
+}
 # ###########################
 init(autoreset=True)  # COLORAMA
 
@@ -413,6 +418,7 @@ for e in tqdm(
         total_norm = torch.nn.utils.clip_grad_norm_(
             policy_net.parameters(), MAX_GRAD_NORM
         )
+        grad_norm_data["grad_norm_values"].append(float(total_norm))
         if total_norm > MAX_GRAD_NORM:
             logger.warning(
                 f"Gradient clipping activated! Total norm before clipping: {total_norm:.4f}"
@@ -460,6 +466,7 @@ for e in tqdm(
         )
 
     loss_data["epoch_values"].append(step_i)
+    grad_norm_data["epoch_values"].append(step_i)
 
     # We're also using a learning rate scheduler. Like the gradient clipping,
     # this is a nice-to-have but nothing necessary for PPO to work.
@@ -515,6 +522,7 @@ for e in tqdm(
                 {
                     "epochs_results": epochs_results,
                     "loss_values": loss_data,
+                    "grad_norm_data": grad_norm_data,
                     "win_rate": win_rate,
                     "q_values_history": q_values_history,
                 },
@@ -572,6 +580,15 @@ for e in tqdm(
 
         plot_loss(
             loss_data,
+            FREQ_EPOCH_SAVING=FREQ_EPOCH_SAVING,
+            FOLDER_SAVE=CHECKPOINT_FOLDER,
+            DISPLAY_PLOT=True,
+            experiment_name=EXPERIMENT_NAME,
+        )
+
+        plot_grad_norm(
+            grad_norm_data,
+            MAX_GRAD_NORM=MAX_GRAD_NORM,
             FREQ_EPOCH_SAVING=FREQ_EPOCH_SAVING,
             FOLDER_SAVE=CHECKPOINT_FOLDER,
             DISPLAY_PLOT=True,

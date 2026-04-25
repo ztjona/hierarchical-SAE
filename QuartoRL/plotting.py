@@ -254,6 +254,108 @@ def plot_loss(
         )
 
 
+def plot_grad_norm(
+    grad_norm_data: dict[str, list[float | int]],
+    MAX_GRAD_NORM: float | None = None,
+    FREQ_EPOCH_SAVING: int = 200,
+    FOLDER_SAVE: str = "./",
+    FIG_NAME=lambda epoch: f"{datetime.now().strftime('%Y%m%d_%H%M')}-grad_norm_{epoch:04d}.svg",
+    DISPLAY_PLOT: bool = False,
+    fig_num: int = 6,
+    position: tuple[int, int] | None = (600, 600),
+    experiment_name: str = "",
+    SAVEFIG_DPI: int = 1000,
+):
+    """Plot per-epoch pre-clip gradient norm (mean ± std) on a log scale.
+
+    Mirrors ``plot_loss`` so divergence canaries can be read at a glance:
+    a creeping mean or expanding std before loss climbs is the typical
+    fingerprint of an unstable optimization regime.
+    """
+    if not DISPLAY_PLOT:
+        plt.ioff()
+    epoch_values = grad_norm_data["epoch_values"]
+    grad_values = grad_norm_data["grad_norm_values"]
+
+    experiment_name = f"{experiment_name}-{fig_num}"
+    if plt.fignum_exists(experiment_name):
+        fig = plt.figure(experiment_name)
+        fig.clf()
+    else:
+        fig = plt.figure(experiment_name, figsize=(10, 5))
+
+    if position is not None:
+        try:
+            manager = fig.canvas.manager  # type: ignore
+            manager.window.wm_geometry(f"+{position[0]}+{position[1]}")  # type: ignore
+        except:
+            pass
+
+    n_epochs = len(epoch_values)
+    epoch_means = []
+    epoch_stds = []
+    epoch_maxes = []
+
+    for i in range(n_epochs):
+        start_idx = epoch_values[i]
+        end_idx = epoch_values[i + 1] if i + 1 < n_epochs else len(grad_values)
+        epoch_norms = grad_values[start_idx:end_idx]
+
+        if len(epoch_norms) > 0:
+            epoch_means.append(np.mean(epoch_norms))
+            epoch_stds.append(np.std(epoch_norms))
+            epoch_maxes.append(np.max(epoch_norms))
+        else:
+            epoch_means.append(np.nan)
+            epoch_stds.append(np.nan)
+            epoch_maxes.append(np.nan)
+
+    epoch_means = np.array(epoch_means)
+    epoch_stds = np.array(epoch_stds)
+    epoch_maxes = np.array(epoch_maxes)
+    epochs = np.arange(n_epochs)
+
+    line = plt.plot(
+        epochs, epoch_means, ".-", alpha=0.8, linewidth=2, label="Mean grad norm"
+    )[0]
+    plt.fill_between(
+        epochs,
+        np.maximum(epoch_means - epoch_stds, 1e-12),  # type: ignore
+        epoch_means + epoch_stds,  # type: ignore
+        alpha=0.3,
+        color=line.get_color(),
+        label="±1 std dev",
+    )
+    plt.plot(epochs, epoch_maxes, "-", alpha=0.4, linewidth=1, label="Max per epoch")
+
+    if MAX_GRAD_NORM is not None:
+        plt.axhline(
+            MAX_GRAD_NORM,
+            color="red",
+            linestyle="--",
+            alpha=0.6,
+            label=f"MAX_GRAD_NORM={MAX_GRAD_NORM}",
+        )
+
+    plt.yscale("log")
+    plt.xlabel("Epoch")
+    plt.ylabel("Pre-clip gradient norm (log)")
+    plt.title(f"Gradient norm up to epoch {n_epochs}")
+    plt.legend()
+    plt.grid(True, which="both", alpha=0.3)
+    plt.tight_layout()
+    if DISPLAY_PLOT:
+        plt.draw()
+        plt.pause(0.001)
+
+    if n_epochs % FREQ_EPOCH_SAVING == 0 and FREQ_EPOCH_SAVING != -1:
+        plt.savefig(
+            path.join(FOLDER_SAVE, FIG_NAME(n_epochs)),
+            dpi=SAVEFIG_DPI,
+            bbox_inches="tight",
+        )
+
+
 def plot_contest_results(epochs_results: list[dict[int, dict[str, int]]]):
     """[LEGACY] Calculate win rate by rival and plot it."""
 
