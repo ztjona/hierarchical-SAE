@@ -8,5 +8,5 @@ from .RL_functions import (
     DECOUPLED_AUTOREG_TENSORDICT_KEYS,
 )
 from .contest import run_contest, contest_2_win_rate
-from .plotting import plot_contest_results, plot_loss, plot_win_rate
+from .plotting import plot_contest_results, plot_loss, plot_grad_norm, plot_win_rate
 from .observers import plot_boards_comp, plot_Qv_progress, plot_Qv_horizon
