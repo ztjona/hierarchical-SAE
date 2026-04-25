@@ -61,11 +61,12 @@ from bot.minimax_bot import MinimaxBot  # noqa: E402
 from bot.random_bot import Quarto_bot as RandomBot  # noqa: E402
 
 # ── constants ──────────────────────────────────────────────────────────────────
-ACTION_PLACE = np.uint8(0)   # teacher places the selected piece
+ACTION_PLACE = np.uint8(0)  # teacher places the selected piece
 ACTION_SELECT = np.uint8(1)  # teacher selects the next piece for opponent
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
+
 
 def _make_bot(name: str):
     """Instantiate a bot by short name."""
@@ -74,8 +75,10 @@ def _make_bot(name: str):
     if name.startswith("minimax_d"):
         depth = int(name.removeprefix("minimax_d"))
         return MinimaxBot(depth=depth)
-    raise ValueError(f"Unknown opponent name: {name!r}.  "
-                     "Supported: random, minimax_d1, minimax_d2, minimax_d3")
+    raise ValueError(
+        f"Unknown opponent name: {name!r}.  "
+        "Supported: random, minimax_d1, minimax_d2, minimax_d3"
+    )
 
 
 def _parse_mix(spec: str) -> list[tuple[str, float]]:
@@ -107,6 +110,7 @@ def _piece_legal_mask(game: QuartoGame) -> np.ndarray:
 
 # ── core data collection ──────────────────────────────────────────────────────
 
+
 def collect_game(
     teacher: MinimaxBot,
     opponent,
@@ -137,16 +141,18 @@ def collect_game(
 
         if is_teacher_turn:
             # ── snapshot state BEFORE the action ──────────────────────────
-            board_enc = game.game_board.encode().squeeze(0).astype(np.float32)   # (16,4,4)
+            board_enc = (
+                game.game_board.encode().squeeze(0).astype(np.float32)
+            )  # (16,4,4)
 
-            if game.pick:   # SELECT phase: teacher chooses a piece for opponent
+            if game.pick:  # SELECT phase: teacher chooses a piece for opponent
                 piece_onehot = np.zeros(16, dtype=np.float32)
                 legal_mask = _piece_legal_mask(game)
                 action = ACTION_SELECT
-            else:           # PLACE phase: teacher places the current selected piece
-                assert isinstance(game.selected_piece, Piece), (
-                    "Expected a Piece in selected_piece during PLACE phase"
-                )
+            else:  # PLACE phase: teacher places the current selected piece
+                assert isinstance(
+                    game.selected_piece, Piece
+                ), "Expected a Piece in selected_piece during PLACE phase"
                 piece_onehot = game.selected_piece.vectorize_onehot().astype(np.float32)
                 legal_mask = _board_legal_mask(game)
                 action = ACTION_PLACE
@@ -159,9 +165,9 @@ def collect_game(
         if is_teacher_turn:
             # ── extract label from move_history ───────────────────────────
             new_moves = game.move_history[prev_len:]
-            assert len(new_moves) == 1, (
-                f"Expected exactly 1 new history entry, got {len(new_moves)}"
-            )
+            assert (
+                len(new_moves) == 1
+            ), f"Expected exactly 1 new history entry, got {len(new_moves)}"
             move = new_moves[0]
 
             if action == ACTION_SELECT:
@@ -169,14 +175,16 @@ def collect_game(
             else:
                 label = np.int16(move["position_index"])
 
-            records.append({
-                "board": board_enc,
-                "piece": piece_onehot,
-                "label": label,
-                "action": action,
-                "legal_mask": legal_mask,
-                "game_id": np.int32(game_id),
-            })
+            records.append(
+                {
+                    "board": board_enc,
+                    "piece": piece_onehot,
+                    "label": label,
+                    "action": action,
+                    "legal_mask": legal_mask,
+                    "game_id": np.int32(game_id),
+                }
+            )
 
         game.cambiar_turno()
 
@@ -184,6 +192,7 @@ def collect_game(
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
+
 
 def main():
     args = docopt(__doc__)
@@ -218,7 +227,7 @@ def main():
         opp_name = random.choices(opponent_names, weights=opponent_weights, k=1)[0]
         opponent = opponents[opp_name]
         # Alternate sides to avoid positional bias
-        teacher_is_p1 = (game_id % 2 == 0)
+        teacher_is_p1 = game_id % 2 == 0
         records = collect_game(teacher, opponent, mode_2x2, game_id, teacher_is_p1)
         all_records.extend(records)
 
@@ -227,12 +236,12 @@ def main():
         return
 
     # ── stack into arrays ──────────────────────────────────────────────────────
-    boards      = np.stack([r["board"]       for r in all_records])   # (N, 16, 4, 4)
-    pieces      = np.stack([r["piece"]       for r in all_records])   # (N, 16)
-    labels      = np.array([r["label"]       for r in all_records], dtype=np.int16)
-    actions     = np.array([r["action"]      for r in all_records], dtype=np.uint8)
-    legal_masks = np.stack([r["legal_mask"]  for r in all_records])   # (N, 16)
-    game_ids    = np.array([r["game_id"]     for r in all_records], dtype=np.int32)
+    boards = np.stack([r["board"] for r in all_records])  # (N, 16, 4, 4)
+    pieces = np.stack([r["piece"] for r in all_records])  # (N, 16)
+    labels = np.array([r["label"] for r in all_records], dtype=np.int16)
+    actions = np.array([r["action"] for r in all_records], dtype=np.uint8)
+    legal_masks = np.stack([r["legal_mask"] for r in all_records])  # (N, 16)
+    game_ids = np.array([r["game_id"] for r in all_records], dtype=np.int32)
 
     np.savez_compressed(
         output_path,
@@ -244,10 +253,12 @@ def main():
         game_ids=game_ids,
     )
 
-    n_place  = int((actions == ACTION_PLACE).sum())
+    n_place = int((actions == ACTION_PLACE).sum())
     n_select = int((actions == ACTION_SELECT).sum())
-    print(f"\nSaved {len(all_records):,} samples  "
-          f"({n_place:,} PLACE + {n_select:,} SELECT)  →  {output_path}")
+    print(
+        f"\nSaved {len(all_records):,} samples  "
+        f"({n_place:,} PLACE + {n_select:,} SELECT)  →  {output_path}"
+    )
     print(f"File size: {output_path.stat().st_size / 1024:.1f} KB")
 
 

@@ -11,7 +11,7 @@ Usage:
     train.py [options]
 
 Options:
-    --data <path>         Input .npz file   [default: projects/supervised-cloning/data/collected.npz]
+    --data <path>         Input .npz file   [default: projects/supervised-cloning/data/collected_5k.npz]
     --out <path>          Checkpoint dir    [default: projects/supervised-cloning/checkpoints]
     --epochs <int>        Training epochs   [default: 150]
     --batch <int>         Batch size        [default: 256]
@@ -50,6 +50,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from tqdm import tqdm
@@ -58,11 +59,106 @@ from docopt import docopt
 from models.CNN1 import QuartoCNN
 
 # ── action constants ───────────────────────────────────────────────────────────
-ACTION_PLACE  = 0
+ACTION_PLACE = 0
 ACTION_SELECT = 1
 
 
+# ── board symmetry augmentation ───────────────────────────────────────────────
+# The 4x4 Quarto board has 8 symmetries (dihedral group D4):
+# 4 rotations × 2 reflections.  Each transforms both the board tensor
+# (16,4,4) and the PLACE label (position index).  SELECT labels are
+# piece indices and are unaffected by board geometry.
+
+
+def _rot90_board(board: np.ndarray) -> np.ndarray:
+    """Rotate board (16,4,4) by 90° counter-clockwise."""
+    return np.rot90(board, k=1, axes=(1, 2)).copy()
+
+
+def _flip_board(board: np.ndarray) -> np.ndarray:
+    """Flip board (16,4,4) horizontally (left-right)."""
+    return np.flip(board, axis=2).copy()
+
+
+def _transform_pos_index(idx: int, transform_id: int) -> int:
+    """Map a flat position index [0-15] through one of the 8 symmetries.
+
+    transform_id:
+        0 = identity
+        1 = rot90  (CCW)
+        2 = rot180
+        3 = rot270
+        4 = flip-H
+        5 = rot90  + flip-H
+        6 = rot180 + flip-H
+        7 = rot270 + flip-H
+    """
+    r, c = divmod(idx, 4)
+    for _ in range(transform_id % 4):
+        r, c = c, 3 - r  # 90° CCW: (r,c) -> (c, 3-r)
+    if transform_id >= 4:
+        c = 3 - c  # horizontal flip
+    return r * 4 + c
+
+
+# Precompute the 8 position-index permutation tables once.
+_POS_PERMS: list[list[int]] = [
+    [_transform_pos_index(i, t) for i in range(16)] for t in range(8)
+]
+
+
+def augment_symmetries(
+    boards: np.ndarray,
+    pieces: np.ndarray,
+    labels: np.ndarray,
+    actions: np.ndarray,
+    legal_masks: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Expand the dataset 8× by applying all dihedral symmetries.
+
+    SELECT samples (action==1): board and legal_mask are transformed;
+        label (piece index) is unchanged.
+    PLACE samples (action==0): board, legal_mask, AND label are transformed
+        via the same permutation.
+    """
+    aug_boards, aug_pieces, aug_labels, aug_actions, aug_masks = [], [], [], [], []
+
+    for t in range(8):
+        perm = np.array(_POS_PERMS[t], dtype=np.int64)  # (16,)
+
+        # Transform boards: rotate / flip the spatial dims
+        b = boards  # (N, 16, 4, 4)
+        for _ in range(t % 4):
+            b = np.rot90(b, k=1, axes=(2, 3))
+        if t >= 4:
+            b = np.flip(b, axis=3)
+        b = b.copy()
+
+        # Transform legal masks: reorder the 16 position slots
+        m = legal_masks[:, perm]  # (N, 16)
+
+        # Transform PLACE labels via the same permutation
+        lbl = labels.copy()
+        place_mask = actions == ACTION_PLACE
+        lbl[place_mask] = perm[lbl[place_mask]]
+
+        aug_boards.append(b)
+        aug_pieces.append(pieces)
+        aug_labels.append(lbl)
+        aug_actions.append(actions)
+        aug_masks.append(m)
+
+    return (
+        np.concatenate(aug_boards, axis=0),
+        np.concatenate(aug_pieces, axis=0),
+        np.concatenate(aug_labels, axis=0),
+        np.concatenate(aug_actions, axis=0),
+        np.concatenate(aug_masks, axis=0),
+    )
+
+
 # ── model wrapper ──────────────────────────────────────────────────────────────
+
 
 class QuartoCNNLogits(QuartoCNN):
     """QuartoCNN that returns raw logits (pre-tanh) for supervised CE loss.
@@ -83,7 +179,7 @@ class QuartoCNNLogits(QuartoCNN):
         x_piece: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         piece_feat = F.relu(self.fc_in_piece(x_piece))
-        piece_map  = piece_feat.view(-1, 1, 4, 4)
+        piece_map = piece_feat.view(-1, 1, 4, 4)
         x = torch.cat([x_board, piece_map], dim=1)
         x = F.relu(self.conv1(x))
         x = F.relu(self.conv2(x))
@@ -91,22 +187,23 @@ class QuartoCNNLogits(QuartoCNN):
         x = F.relu(self.fc1(x))
         x = self.dropout(x)
 
-        logits_board = self.fc2_board(x)                           # (B, 16)
-        qav_board    = torch.tanh(logits_board)                    # for piece-head context
-        x_qav        = torch.cat([x, qav_board], dim=1)
-        logits_piece = self.fc2_piece(x_qav)                       # (B, 16)
+        logits_board = self.fc2_board(x)  # (B, 16)
+        qav_board = torch.tanh(logits_board)  # for piece-head context
+        x_qav = torch.cat([x, qav_board], dim=1)
+        logits_piece = self.fc2_piece(x_qav)  # (B, 16)
 
-        return logits_board, logits_piece                          # raw logits
+        return logits_board, logits_piece  # raw logits
 
 
 # ── dataset ────────────────────────────────────────────────────────────────────
 
+
 class QuartoDataset(Dataset):
     def __init__(self, boards, pieces, labels, actions, legal_masks):
-        self.boards      = torch.from_numpy(boards)
-        self.pieces      = torch.from_numpy(pieces)
-        self.labels      = torch.from_numpy(labels.astype(np.int64))
-        self.actions     = torch.from_numpy(actions.astype(np.int64))
+        self.boards = torch.from_numpy(boards)
+        self.pieces = torch.from_numpy(pieces)
+        self.labels = torch.from_numpy(labels.astype(np.int64))
+        self.actions = torch.from_numpy(actions.astype(np.int64))
         self.legal_masks = torch.from_numpy(legal_masks)
 
     def __len__(self):
@@ -132,24 +229,31 @@ def load_split(npz_path: Path, val_split: float, seed: int):
     rng = np.random.default_rng(seed)
     rng.shuffle(unique_games)
 
-    n_val  = max(1, int(len(unique_games) * val_split))
-    val_games  = set(unique_games[:n_val].tolist())
+    n_val = max(1, int(len(unique_games) * val_split))
+    val_games = set(unique_games[:n_val].tolist())
     train_games = set(unique_games[n_val:].tolist())
 
     tr_idx = np.where(np.isin(game_ids, list(train_games)))[0]
     va_idx = np.where(np.isin(game_ids, list(val_games)))[0]
 
     def subset(idx):
-        return (boards[idx], pieces[idx], labels[idx],
-                actions[idx], legal_masks[idx])
+        return (boards[idx], pieces[idx], labels[idx], actions[idx], legal_masks[idx])
 
-    return QuartoDataset(*subset(tr_idx)), QuartoDataset(*subset(va_idx))
+    # Augment only training split — val stays clean (original positions)
+    tr_data = augment_symmetries(*subset(tr_idx))
+    va_data = subset(va_idx)
+    print(
+        f"Symmetry augmentation: {len(subset(tr_idx)[0]):,} → {len(tr_data[0]):,} train samples"
+    )
+    return QuartoDataset(*tr_data), QuartoDataset(*va_data)
 
 
 # ── masked cross-entropy ───────────────────────────────────────────────────────
 
-def masked_ce(logits: torch.Tensor, targets: torch.Tensor,
-              mask: torch.Tensor) -> torch.Tensor:
+
+def masked_ce(
+    logits: torch.Tensor, targets: torch.Tensor, mask: torch.Tensor
+) -> torch.Tensor:
     """Cross-entropy with illegal moves masked to -inf."""
     logits = logits.clone()
     logits[~mask] = float("-inf")
@@ -158,50 +262,55 @@ def masked_ce(logits: torch.Tensor, targets: torch.Tensor,
 
 # ── one epoch ─────────────────────────────────────────────────────────────────
 
+
+def _topk_correct(logits: torch.Tensor, targets: torch.Tensor, k: int = 3) -> int:
+    """Count samples where the true label is among the top-k predictions."""
+    topk = logits.topk(k, dim=1).indices  # (B, k)
+    return (topk == targets.unsqueeze(1)).any(dim=1).sum().item()
+
+
 def run_epoch(model, loader, device, optimizer=None, lam=1.0):
     training = optimizer is not None
     model.train(training)
 
     total_loss = 0.0
-    place_correct = place_total = 0
-    sel_correct   = sel_total   = 0
+    place_correct = place_top3 = place_total = 0
+    sel_correct = sel_top3 = sel_total = 0
 
     with torch.set_grad_enabled(training):
         for boards, pieces, labels, actions, masks in loader:
-            boards  = boards.to(device)
-            pieces  = pieces.to(device)
-            labels  = labels.to(device)
+            boards = boards.to(device)
+            pieces = pieces.to(device)
+            labels = labels.to(device)
             actions = actions.to(device)
-            masks   = masks.to(device)
+            masks = masks.to(device)
 
             logits_board, logits_piece = model(boards, pieces)
 
-            place_idx  = (actions == ACTION_PLACE)
-            select_idx = (actions == ACTION_SELECT)
+            place_idx = actions == ACTION_PLACE
+            select_idx = actions == ACTION_SELECT
 
             loss = torch.tensor(0.0, device=device)
 
             if place_idx.any():
-                loss_place = masked_ce(
-                    logits_board[place_idx],
-                    labels[place_idx],
-                    masks[place_idx],
-                )
+                lb = logits_board[place_idx]
+                lp_lbl = labels[place_idx]
+                lp_msk = masks[place_idx]
+                loss_place = masked_ce(lb, lp_lbl, lp_msk)
                 loss = loss + loss_place
-                preds = logits_board[place_idx].argmax(dim=1)
-                place_correct += (preds == labels[place_idx]).sum().item()
-                place_total   += place_idx.sum().item()
+                place_correct += (lb.argmax(dim=1) == lp_lbl).sum().item()
+                place_top3 += _topk_correct(lb, lp_lbl, k=3)
+                place_total += place_idx.sum().item()
 
             if select_idx.any():
-                loss_select = masked_ce(
-                    logits_piece[select_idx],
-                    labels[select_idx],
-                    masks[select_idx],
-                )
+                lp = logits_piece[select_idx]
+                ls_lbl = labels[select_idx]
+                ls_msk = masks[select_idx]
+                loss_select = masked_ce(lp, ls_lbl, ls_msk)
                 loss = loss + lam * loss_select
-                preds = logits_piece[select_idx].argmax(dim=1)
-                sel_correct += (preds == labels[select_idx]).sum().item()
-                sel_total   += select_idx.sum().item()
+                sel_correct += (lp.argmax(dim=1) == ls_lbl).sum().item()
+                sel_top3 += _topk_correct(lp, ls_lbl, k=3)
+                sel_total += select_idx.sum().item()
 
             if training:
                 optimizer.zero_grad()
@@ -212,23 +321,26 @@ def run_epoch(model, loader, device, optimizer=None, lam=1.0):
 
     n = len(loader.dataset)
     return {
-        "loss":       total_loss / n,
-        "place_acc":  place_correct / place_total  if place_total  else float("nan"),
-        "select_acc": sel_correct   / sel_total    if sel_total    else float("nan"),
+        "loss": total_loss / n,
+        "place_acc": place_correct / place_total if place_total else float("nan"),
+        "place_top3": place_top3 / place_total if place_total else float("nan"),
+        "select_acc": sel_correct / sel_total if sel_total else float("nan"),
+        "select_top3": sel_top3 / sel_total if sel_total else float("nan"),
     }
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
+
 def main():
-    args    = docopt(__doc__)
-    epochs  = int(args["--epochs"])
-    batch   = int(args["--batch"])
-    lr      = float(args["--lr"])
+    args = docopt(__doc__)
+    epochs = int(args["--epochs"])
+    batch = int(args["--batch"])
+    lr = float(args["--lr"])
     val_spl = float(args["--val-split"])
-    lam     = float(args["--lam"])
-    seed    = int(args["--seed"])
-    data_p  = Path(args["--data"])
+    lam = float(args["--lam"])
+    seed = int(args["--seed"])
+    data_p = Path(args["--data"])
     out_dir = Path(args["--out"])
 
     random.seed(seed)
@@ -245,31 +357,44 @@ def main():
     train_ds, val_ds = load_split(data_p, val_spl, seed)
     print(f"Train samples: {len(train_ds):,}  |  Val samples: {len(val_ds):,}\n")
 
-    train_dl = DataLoader(train_ds, batch_size=batch, shuffle=True,  num_workers=0)
-    val_dl   = DataLoader(val_ds,   batch_size=batch, shuffle=False, num_workers=0)
+    train_dl = DataLoader(train_ds, batch_size=batch, shuffle=True, num_workers=0)
+    val_dl = DataLoader(val_ds, batch_size=batch, shuffle=False, num_workers=0)
 
-    model     = QuartoCNNLogits().to(device)
+    model = QuartoCNNLogits().to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
-    history = {"train_loss": [], "val_loss": [],
-               "train_place_acc": [], "val_place_acc": [],
-               "train_sel_acc":   [], "val_sel_acc":   []}
+    history = {
+        "train_loss": [],
+        "val_loss": [],
+        "train_place_acc": [],
+        "val_place_acc": [],
+        "train_place_top3": [],
+        "val_place_top3": [],
+        "train_sel_acc": [],
+        "val_sel_acc": [],
+        "train_sel_top3": [],
+        "val_sel_top3": [],
+    }
 
     best_val_acc = -1.0
-    best_path    = out_dir / "best.pt"
+    best_path = out_dir / "best.pt"
 
     for epoch in tqdm(range(1, epochs + 1), desc="Training", unit="epoch"):
         tr = run_epoch(model, train_dl, device, optimizer, lam)
-        va = run_epoch(model, val_dl,   device, lam=lam)
+        va = run_epoch(model, val_dl, device, lam=lam)
         scheduler.step()
 
         history["train_loss"].append(tr["loss"])
         history["val_loss"].append(va["loss"])
         history["train_place_acc"].append(tr["place_acc"])
         history["val_place_acc"].append(va["place_acc"])
+        history["train_place_top3"].append(tr["place_top3"])
+        history["val_place_top3"].append(va["place_top3"])
         history["train_sel_acc"].append(tr["select_acc"])
         history["val_sel_acc"].append(va["select_acc"])
+        history["train_sel_top3"].append(tr["select_top3"])
+        history["val_sel_top3"].append(va["select_top3"])
 
         # combined val accuracy (simple average of both heads)
         val_acc = (va["place_acc"] + va["select_acc"]) / 2
@@ -282,8 +407,10 @@ def main():
             tqdm.write(
                 f"Ep {epoch:4d}  "
                 f"loss={tr['loss']:.4f}/{va['loss']:.4f}  "
-                f"place_acc={tr['place_acc']:.2%}/{va['place_acc']:.2%}  "
-                f"sel_acc={tr['select_acc']:.2%}/{va['select_acc']:.2%}"
+                f"place={tr['place_acc']:.2%}(top3={tr['place_top3']:.2%})"
+                f"/{va['place_acc']:.2%}(top3={va['place_top3']:.2%})  "
+                f"sel={tr['select_acc']:.2%}(top3={tr['select_top3']:.2%})"
+                f"/{va['select_acc']:.2%}(top3={va['select_top3']:.2%})"
             )
 
     # ── save final checkpoint ──────────────────────────────────────────────────
@@ -298,21 +425,69 @@ def main():
 
     ax = axes[0]
     ax.plot(epochs_range, history["train_loss"], label="train")
-    ax.plot(epochs_range, history["val_loss"],   label="val")
+    ax.plot(epochs_range, history["val_loss"], label="val")
     ax.set_xlabel("Epoch")
     ax.set_ylabel("Loss")
     ax.set_title("Cross-Entropy Loss")
     ax.legend()
 
     ax2 = axes[1]
-    ax2.plot(epochs_range, history["train_place_acc"], label="train PLACE")
-    ax2.plot(epochs_range, history["val_place_acc"],   label="val PLACE")
-    ax2.plot(epochs_range, history["train_sel_acc"],   label="train SELECT", linestyle="--")
-    ax2.plot(epochs_range, history["val_sel_acc"],     label="val SELECT",   linestyle="--")
+    ax2.plot(
+        epochs_range,
+        history["train_place_acc"],
+        label="train PLACE top-1",
+        color="tab:blue",
+    )
+    ax2.plot(
+        epochs_range,
+        history["val_place_acc"],
+        label="val PLACE top-1",
+        color="tab:blue",
+        linestyle="--",
+    )
+    ax2.plot(
+        epochs_range,
+        history["train_place_top3"],
+        label="train PLACE top-3",
+        color="tab:cyan",
+    )
+    ax2.plot(
+        epochs_range,
+        history["val_place_top3"],
+        label="val PLACE top-3",
+        color="tab:cyan",
+        linestyle="--",
+    )
+    ax2.plot(
+        epochs_range,
+        history["train_sel_acc"],
+        label="train SELECT top-1",
+        color="tab:orange",
+    )
+    ax2.plot(
+        epochs_range,
+        history["val_sel_acc"],
+        label="val SELECT top-1",
+        color="tab:orange",
+        linestyle="--",
+    )
+    ax2.plot(
+        epochs_range,
+        history["train_sel_top3"],
+        label="train SELECT top-3",
+        color="tab:red",
+    )
+    ax2.plot(
+        epochs_range,
+        history["val_sel_top3"],
+        label="val SELECT top-3",
+        color="tab:red",
+        linestyle="--",
+    )
     ax2.set_xlabel("Epoch")
-    ax2.set_ylabel("Top-1 Accuracy")
-    ax2.set_title("Accuracy per Head")
-    ax2.legend()
+    ax2.set_ylabel("Accuracy")
+    ax2.set_title("Accuracy per Head (top-1 and top-3)")
+    ax2.legend(fontsize=7)
 
     plt.tight_layout()
     plot_path = out_dir / "training_curves.png"
