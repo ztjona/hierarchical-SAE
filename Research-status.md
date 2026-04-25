@@ -481,6 +481,20 @@ Rationale (from `Current Open Problem` → Q_select saturation):
 
 ---
 
+## Diagnostic Plot Ideas (deferred)
+
+**Bellman residual by horizon** (`|Q(s,a) − target|` vs `steps_to_terminal`):
+- For Q_select with `mc_select`, the target is `γ^steps · outcome` — fully deterministic from stored fields. The residual is a linear transformation of the existing horizon QV data and adds no new information in this configuration.
+- For Q_place the target requires `max_a' Q_target(s', a')` (not stored), so Q_place residual would be genuinely new — but Q_place is the already-working head, so priority is low.
+- **Verdict:** Skip until a configuration where the Q_select target is non-trivial (e.g. Bellman bootstrap for select).
+
+**Action gap** (`max_a Q(s,a) − Q(s, taken_a)` vs steps):
+- Measures how far the logged policy is from greedy. Would require returning `qav_place/select.max(dim=1)` from `evaluate()` alongside the taken-action values — no extra forward passes.
+- Confounded by `TEMPERATURE_EXPLORE`: non-zero gap can simply mean a non-greedy sample was drawn. Not informative about policy quality independently of temperature.
+- **Verdict:** Defer. Note the idea if a low-temperature evaluation buffer is introduced.
+
+---
+
 ## Pending: Ad_endgame
 
 **Hypothesis:** Maintaining a separate endgame replay buffer (N=2 experience) alongside the curriculum buffer will prevent catastrophic forgetting.
