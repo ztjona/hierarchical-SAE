@@ -55,7 +55,7 @@ from tqdm import tqdm
 # PARAM_NAME = "N_LAST_STATES_INIT"
 
 EXPERIMENT_NAME = "Z_tempRegresive"
-PARAM_NAME = ""
+PARAM_NAME = "N_LAST_STATES_INIT"
 
 # BASELINEs: Include specific runs from previous experiments as reference points
 # Format: List of dicts mapping experiment name to list of parameter values
