@@ -13,6 +13,7 @@ Experiments use a two-part name: **`XY_description`**
   - `J`: final-only rewards with standard bounded uncoupled DQN (JA_final)
   - `K`: final-only rewards with coupled place→select architecture (KA_coupled)
   - `L`: Monte Carlo return target on Q_select in the joint pipeline (LA_mcSelect, LB_mcSelect)
+  - `M`: decoupled-autoregressive transition schema (`QuartoCNNAutoreg` + `Quarto_autoreg_bot`) with `td_place_mc_select` targets — TD/Bellman on Q_place, Monte Carlo on Q_select. First sweep `MA_tempRegresive` was mis-named (should have been `MA_*`); subsequent sweeps follow the convention (`MB_final`, ...).
 - **Second letter (Y)** — Hyperparameter sweep within the same code version:
   - `a`, `b`, `c`, ... for successive sweeps (e.g., Aa_replay, Ab_data, Ac_fine)
 
@@ -209,6 +210,7 @@ This explains why N=2 still worked (only 2 Bellman steps, limited divergence) wh
 4. **Root cause identified:** the replay buffer evicts end-game experience as curriculum expands, destroying the Q-value anchor for Bellman targets
 5. **Adversarial sign flip is wrong with propagated rewards** (FA_Bellman): double-negation causes Q-value divergence proportional to chain length. The "propagate" reward function already handles adversarial perspective.
 6. **Q_select saturation at -1 is a persistent problem** across all experiments — the select head never learns meaningful Q-values.
+7. **Decoupled-autoreg schema needs N≥3 to feed Q_select positive samples** (MA_tempRegresive). N=2 in this schema keeps only `{loser_place, loser_select, winner_terminal_place}`, so Q_select sees `outcome=−1` exclusively. Decoupling softens the N-cliff (N=3 beats joint mc_select by +12pp WR), but Q_select still does not separate by outcome and Q_place develops a `propagate + tanh` unreachable-target floor at ~0.35 loss.
 
 ---
 
@@ -458,6 +460,62 @@ Rationale (from `Current Open Problem` → Q_select saturation):
 
 ---
 
+## MA_tempRegresive — Decoupled-Autoregressive Schema (N_LAST_STATES sweep)
+
+> **Naming note:** this should have been `MA_*` per the convention (first sweep of code version `M`). The `Z_*` prefix was an oversight; subsequent decoupled-autoreg sweeps follow the `M*_*` scheme.
+
+**Question:** Does training place and select on **separate transitions** — instead of bundling them into one joint experience tuple — give Q_select an independent, well-anchored learning signal and remove the cross-head interference observed in every prior code version?
+
+**Code change:**
+- New `TRANSITION_SCHEMA="decoupled_autoreg"` in `gen_experience` / `DQN_training_step` (`QuartoRL/RL_functions.py`).
+- New architecture `QuartoCNNAutoreg` (`models/CNN_autoreg.py`) with a shared trunk + phase embedding + place/select heads, called twice per turn (one phase per pass).
+- New bot `Quarto_autoreg_bot` (`bot/CNN_autoreg_bot.py`) using `predict_phase` / `q_values_phase` for inference.
+- `DECOUPLED_TARGET_STYLE="td_place_mc_select"`: place transitions use `R + γ · max_a' Q_target(s', next_phase=select, a')`; select transitions use `γ^steps_to_terminal · outcome`.
+
+| Run | N_LAST_STATES_INIT |
+|-----|---------------------|
+| MA_tempRegresive(1) | 2 |
+| MA_tempRegresive(2) | 3 |
+| MA_tempRegresive(3) | 4 |
+| MA_tempRegresive(4) | 6 |
+| MA_tempRegresive(5) | 12 |
+| MA_tempRegresive(6) | 16 |
+
+**Fixed:** `STARTING_NET=None`, `EPOCHS=5000`, `NUM_EPOCHs_BUFFER=8`, `LR=7e-4`, `TAU=0.01`, `GAMMA=0.99`, `ARCHITECTURE=QuartoCNNAutoreg`, `TRANSITION_SCHEMA="decoupled_autoreg"`, `DECOUPLED_TARGET_STYLE="td_place_mc_select"`, `LOSS_APPROACH="mc_select"`, `REWARD_FUNCTION="propagate"`.
+
+**Result (5000 epochs, full sweep):**
+
+| N | Final loss | Final WR vs bot_loss-BT | Final WR vs bot_random |
+|---|---|---|---|
+| 2 | 0.314 | 56.0% | 72.8% |
+| 3 | 0.388 | 41.8% | 62.5% |
+| 4 | 0.420 | 49.7% | 70.7% |
+| 6 | 0.424 | 41.0% | 61.8% |
+| 12 | 0.413 | 34.5% | 54.9% |
+| 16 | 0.392 | 32.7% | 53.7% |
+
+Compared to the joint `LA_mcSelect` baseline:
+
+| N | Joint LA_mcSelect WR vs bot_loss-BT | Decoupled MA_tempRegresive WR vs bot_loss-BT | Δ |
+|---|---|---|---|
+| 2 | 65.2% | 56.0% | **−9.2pp** |
+| 3 | 30.0% | 41.8% | **+11.8pp** |
+
+**Key diagnostic findings (qv panels):**
+
+1. **N=2 starves Q_select of positive samples.** With cutoff = 3 transitions per match in the decoupled schema, the kept window is always `{loser_place, loser_select, winner_terminal_place}` — the only select transition is the loser's, so Q_select sees `outcome=−1` exclusively. The N=2 Q_select Outcome=+1 panel has effectively no samples (colorbar maxes at 0.10%). N=3 finally adds the winner's earlier select to the window, populating both signs.
+2. **N=3 confirms Q_select gets data, but does not learn to separate.** At N=4 both Q_select Outcome=−1 and Outcome=+1 collapse to a single ~−0.5 band; at N=16 both collapse to ~0. The schema fixed *availability* of positive samples but not the *learning* problem on the select head.
+3. **Q_place develops a bimodal pathology across every N.** Outcome=−1 panels show a bright band at **+1** (loser states predicted as winning) alongside the expected band at −1. At N≥6 both heads collapse toward a diffuse band near 0. The model is partly fitting the degenerate "predict +1 always" solution — which is enough to win 56% vs `bot_loss-BT` at N=2 but is not value learning.
+4. **Loss is stuck at 0.30–0.42 across every N**, with no decay over 5000 epochs (vs `LA_mcSelect(1)` reaching 0.033 at N=2). The floor matches what `propagate + tanh + bootstrap` predicts: place targets ≈ ±2 (immediate ±1 reward + γ·±1 bootstrap from Q_select MC) are unreachable under `tanh` and leave a permanent SmoothL1 residual — the same double-counting pathology as `FA_Bellman`, mediated through Q_select instead of an explicit sign flip.
+
+**Conclusion:**
+- ✓ Hypothesis partially confirmed: decoupling gives the schema a softer N-cliff (N=3 beats joint by +12pp; N=4 beats N=3 — non-monotonic, real). It does spread value learning across deeper windows.
+- ✗ Hypothesis partially falsified: Q_select still does not separate by outcome even when given positive samples, so decoupling alone is not the missing ingredient.
+- ✗ Decoupled-autoreg with `propagate` loses the N=2 sweet spot and cannot match the best joint baseline. The dominant failure mode shifts from "Q_select has no signal" (joint) to "Q_place targets are unreachable under tanh" (decoupled).
+- **Next move:** keep the schema, change reward to `final` (`MB_final`). This is the single change most likely to fix the unreachable-target floor without re-coupling the heads.
+
+---
+
 ## Literature Note — Branching DQN
 
 **Reference:** Tavakoli, Pardo, Kormushev, *Action Branching Architectures for Deep Reinforcement Learning*, AAAI 2018.
@@ -492,6 +550,20 @@ Rationale (from `Current Open Problem` → Q_select saturation):
 - Measures how far the logged policy is from greedy. Would require returning `qav_place/select.max(dim=1)` from `evaluate()` alongside the taken-action values — no extra forward passes.
 - Confounded by `TEMPERATURE_EXPLORE`: non-zero gap can simply mean a non-greedy sample was drawn. Not informative about policy quality independently of temperature.
 - **Verdict:** Defer. Note the idea if a low-temperature evaluation buffer is introduced.
+
+---
+
+## Pending: MB_final — Decoupled-Autoreg with Final Reward
+
+**Hypothesis:** With `REWARD_FUNCTION="final"`, intermediate place transitions get reward `0` instead of ±1, so the place TD target becomes `γ · max_a' Q_select(s', a')` — bounded in `[−γ, +γ]` and reachable under `tanh`. This should remove the loss floor observed in `MA_tempRegresive` (the `propagate + tanh + bootstrap` double-counting issue) without re-coupling the heads. If it works, the bimodal Q_place pathology should disappear and N=2 should at least match the joint LA_mcSelect baseline.
+
+**Sweep:** `N_LAST_STATES_INIT` ∈ {2, 3, 4, 6, 12, 16} — same grid as MA_tempRegresive for direct comparison.
+
+**Fixed:** `STARTING_NET=None`, `EPOCHS=5000`, `NUM_EPOCHs_BUFFER=8`, `LR=7e-4`, `TAU=0.01`, `GAMMA=0.99`, `ARCHITECTURE=QuartoCNNAutoreg`, `TRANSITION_SCHEMA="decoupled_autoreg"`, `DECOUPLED_TARGET_STYLE="td_place_mc_select"`, `LOSS_APPROACH="mc_select"`, `REWARD_FUNCTION="final"`.
+
+**Decision gate:**
+- **If loss floor disappears at N=2 (target ~0.05) and Q_place outcome=−1 stops showing the +1 band** → reward design was the dominant failure mode; proceed to characterize the schema's N-tolerance properly.
+- **If the floor persists** → the issue is not the reward but the bootstrap-through-Q_select coupling itself; next step is `MC_*` with MC targets on both heads (no place TD), or revisit LR/grad-norm telemetry now that `plot_grad_norm` is wired.
 
 ---
 

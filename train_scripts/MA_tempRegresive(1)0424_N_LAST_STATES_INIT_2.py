@@ -39,7 +39,7 @@ logger.info("Imports done.")
 
 # STARTING_NET = "CHECKPOINTS\\Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8\\20260227_1103-Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8_E_5000.pt"
 STARTING_NET = None  # Set to None to start with random weights
-EXPERIMENT_NAME = "Z_tempRegresive(6)0424_N_LAST_STATES_INIT_16"
+EXPERIMENT_NAME = "MA_tempRegresive(1)0424_N_LAST_STATES_INIT_2"
 CHECKPOINT_FOLDER = f"./CHECKPOINTS/{EXPERIMENT_NAME}/"
 # TRANSITION_SCHEMA options: "joint" or "decoupled_autoreg"
 # Architecture, bot, and schema must be changed together:
@@ -83,7 +83,7 @@ mode_2x2 = True
 EPOCHS = 5_000
 
 # number of last states to consider in the experience generation at the beginning of training
-N_LAST_STATES_INIT = 16
+N_LAST_STATES_INIT = 2
 # number of last states to consider in the experience generation at the end of training. -1 means all states
 N_LAST_STATES_FINAL = N_LAST_STATES_INIT  # No curriculum, constant
 
