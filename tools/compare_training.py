@@ -50,11 +50,8 @@ from tqdm import tqdm
 # EXPERIMENT_NAME = "KA_coupled"
 # PARAM_NAME = "N_LAST_STATES_INIT"
 
-# EXPERIMENT_NAME = "LA_mcSelect"
-# EXPERIMENT_NAME = "LB_mcSelect"
-# PARAM_NAME = "N_LAST_STATES_INIT"
-
-EXPERIMENT_NAME = "Z_tempRegresive"
+EXPERIMENT_NAME = "LA_mcSelect"
+EXPERIMENT_NAME = "LB_mcSelect"
 PARAM_NAME = "N_LAST_STATES_INIT"
 
 # BASELINEs: Include specific runs from previous experiments as reference points
@@ -73,10 +70,9 @@ BASELINEs = [
     # {"Aa_replay": [8, 1024]},
     # {"Ab_data": [8]},
     # {"Ab_data": [4, 8, 12]},
-    {"Aa_replay": [8]},
+    # {"Aa_replay": [8]},
     # {"JA_final": [3]},
-    # {"LA_mcSelect": [2, 3, 4, 6, 12, 16]},
-    {"LA_mcSelect": [2, 3]},
+    {"LA_mcSelect": [2, 3, 4, 6, 12, 16]},
 ]
 # BASELINEs = []  # Disable baselines
 
@@ -286,17 +282,16 @@ def find_experiment_folders(base_path, experiment_names):
         for folder in checkpoint_path.glob(pattern):
             if folder.is_dir():
                 param_value = extract_param_value(folder.name)
-                # Allow folders with no extractable param value (single run, no variants)
-                folders.append(
-                    {
-                        "path": folder,
-                        "name": folder.name,
-                        "param_value": param_value if param_value is not None else 1.0,
-                        "no_param": param_value is None,
-                        "experiment": exp_name,
-                        "is_baseline": False,
-                    }
-                )
+                if param_value is not None:
+                    folders.append(
+                        {
+                            "path": folder,
+                            "name": folder.name,
+                            "param_value": param_value,
+                            "experiment": exp_name,
+                            "is_baseline": False,
+                        }
+                    )
 
     # Sort by parameter value
     folders.sort(key=lambda x: x["param_value"])
@@ -585,21 +580,18 @@ def plot_losses(all_data, folders):
         opacity = 0.6 if is_baseline else 0.8
         width = 2.0 if is_baseline else 2.5
         name_prefix = f"[{exp_name}] " if is_baseline else ""
-        if folder_info.get("no_param"):
-            run_label = folder_info["name"]
-        else:
-            label_param = folder_info.get("param_name", PARAM_NAME)
-            run_label = f"{label_param}={format_param_value(param_value)}"
+        label_param = folder_info.get("param_name", PARAM_NAME)
+        param_str = format_param_value(param_value)
 
         fig.add_trace(
             go.Scatter(
                 x=x_values,
                 y=smoothed,
                 mode="lines",
-                name=f"{name_prefix}{run_label}",
+                name=f"{name_prefix}{label_param}={param_str}",
                 line=dict(color=colors[idx], width=width, dash=line_style),
                 opacity=opacity,
-                hovertemplate=f"<b>{name_prefix}{run_label}</b><br>Epoch: %{{x}}<br>Loss: %{{y:.4f}}<extra></extra>",
+                hovertemplate=f"<b>{name_prefix}{label_param}={param_str}</b><br>Epoch: %{{x}}<br>Loss: %{{y:.4f}}<extra></extra>",
             )
         )
 
@@ -659,11 +651,8 @@ def plot_win_rates(all_data, folders):
         opacity = 0.6 if is_baseline else 0.8
         width = 2.0 if is_baseline else 2.5
         name_prefix = f"[{exp_name}] " if is_baseline else ""
-        if folder_info.get("no_param"):
-            run_label = folder_info["name"]
-        else:
-            label_param = folder_info.get("param_name", PARAM_NAME)
-            run_label = f"{label_param}={format_param_value(param_value)}"
+        label_param = folder_info.get("param_name", PARAM_NAME)
+        param_str = format_param_value(param_value)
 
         for rival_idx, rival_name in enumerate(rival_names):
             if rival_name in win_rate_data:
@@ -686,10 +675,10 @@ def plot_win_rates(all_data, folders):
                         x=epochs,
                         y=smoothed_wr,
                         mode="lines",
-                        name=f"{name_prefix}{run_label}",
+                        name=f"{name_prefix}{label_param}={param_str}",
                         line=dict(color=colors[idx], width=width, dash=line_style),
                         opacity=opacity,
-                        hovertemplate=f"<b>{name_prefix}{run_label}</b><br>Epoch: %{{x}}<br>Win Rate: %{{y:.2%}}<extra></extra>",
+                        hovertemplate=f"<b>{name_prefix}{label_param}={param_str}</b><br>Epoch: %{{x}}<br>Win Rate: %{{y:.2%}}<extra></extra>",
                         showlegend=(rival_idx == 0),  # Only show legend once
                     ),
                     row=1,
