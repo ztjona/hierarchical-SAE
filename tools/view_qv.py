@@ -24,6 +24,7 @@ import pickle
 import io
 from os import path
 
+import numpy as np
 import torch
 import matplotlib.pyplot as plt
 
@@ -211,11 +212,28 @@ def main():
                 qh["steps_to_terminal"][0] if qh.get("steps_to_terminal") else None
             )
             if outcome is not None and steps_to_terminal is not None:
+                # Auto-detect decoupled schema: in decoupled experiments, the
+                # CNN_autoreg_bot.evaluate contract sets q_place=NaN for all
+                # select-phase transitions (odd steps) and q_select=NaN for all
+                # place-phase transitions (even steps).  Check if every odd-step
+                # q_place value is non-finite; if so, infer phase from step parity.
+                _q_p = np.array(qh["q_place"][-1])
+                _s_t = np.array(steps_to_terminal)
+                _min_len = min(len(_q_p), len(_s_t))
+                _odd_mask = _s_t[:_min_len] % 2 == 1
+                _phase_horizon = None
+                if (
+                    _odd_mask.any()
+                    and not np.isfinite(_q_p[:_min_len][_odd_mask]).any()
+                ):
+                    _phase_horizon = np.where(_s_t % 2 == 0, 0, 1).astype(np.float32)
+
                 plot_Qv_horizon(
                     qh["q_place"][-1],
                     qh["q_select"][-1],
                     outcome,
                     steps_to_terminal,
+                    phase=_phase_horizon,
                     fig_num=5,
                     DISPLAY_PLOT=True,
                     experiment_name=full_name,

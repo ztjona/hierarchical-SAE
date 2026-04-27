@@ -561,6 +561,7 @@ for e in tqdm(
             q_select,
             exp["outcome"],
             exp["steps_to_terminal"],
+            phase=exp.get("phase", None),
             fig_num=5,
             DISPLAY_PLOT=True,
             experiment_name=EXPERIMENT_NAME,
