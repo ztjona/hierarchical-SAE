@@ -39,7 +39,7 @@ logger.info("Imports done.")
 
 # STARTING_NET = "CHECKPOINTS\\Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8\\20260227_1103-Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8_E_5000.pt"
 STARTING_NET = None  # Set to None to start with random weights
-EXPERIMENT_NAME = "Z_tempRegresive(3)0424_N_LAST_STATES_INIT_4"
+EXPERIMENT_NAME = "MA_tempRegresive(3)0424_N_LAST_STATES_INIT_4"
 CHECKPOINT_FOLDER = f"./CHECKPOINTS/{EXPERIMENT_NAME}/"
 # TRANSITION_SCHEMA options: "joint" or "decoupled_autoreg"
 # Architecture, bot, and schema must be changed together:
