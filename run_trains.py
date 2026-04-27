@@ -1,20 +1,20 @@
 # -*- coding: utf-8 -*-
 
-"""
-Python 3
-30 / 10 / 2025
-@author: z_tjona
+"""Generate parameter-sweep training scripts from trainRL.py.
 
+Usage:
+  run_trains.py <experiment_name>
+  run_trains.py -h | --help
 
-"I find that I don't understand things unless I try to program them."
--Donald E. Knuth
-
-"Either mathematics is too big for the human mind or the human mind is more than a machine."
--Kurt Godël
+Arguments:
+  <experiment_name>  Name for the experiment family (overrides the hardcoded
+                     EXPERIMENT_NAME). PARAM_ITERATE and PARAMS stay as set
+                     in the file.
 """
 import re
 from os import path
 from datetime import datetime
+from docopt import docopt
 
 
 # INVALID results and before
@@ -123,6 +123,10 @@ def create_training_file(param_value, experiment_name):
 
 def main():
     """Main execution loop."""
+    args = docopt(__doc__)
+    global EXPERIMENT_NAME
+    EXPERIMENT_NAME = args["<experiment_name>"]
+
     print(f"\n{'=' * 80}")
     print(f"CREATING TRAINING FILES")
     print(f"EXPERIMENT: {EXPERIMENT_NAME}")

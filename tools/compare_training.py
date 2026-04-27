@@ -1,13 +1,19 @@
 # -*- coding: utf-8 -*-
 
-"""
-Training Comparison Script - Pruned Edition
+"""Compare training runs: plots loss and win rate by epoch.
 
-Compares training runs and plots loss + win rate by epoch.
-Keep it simple: only two plots.
+Usage:
+  compare_training.py <experiment_name> [--param=<param>]
+  compare_training.py -h | --help
 
-Author: z_tjona
-Date: 2026
+Arguments:
+  <experiment_name>  Experiment family name (e.g. MA_tempRegresive). Supports
+                     a single name; for multi-experiment combos edit BASELINEs
+                     directly.
+
+Options:
+  --param=<param>    Parameter name used in the sweep folder names
+                     [default: N_LAST_STATES_INIT].
 """
 
 import os
@@ -15,6 +21,7 @@ import pickle
 import subprocess
 from datetime import datetime
 import numpy as np
+from docopt import docopt
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.colors as pc
@@ -720,6 +727,11 @@ def plot_win_rates(all_data, folders):
 
 def main():
     """Main execution function - generates loss and win rate plots."""
+    args = docopt(__doc__)
+    global EXPERIMENT_NAME, PARAM_NAME
+    EXPERIMENT_NAME = args["<experiment_name>"]
+    PARAM_NAME = args["--param"]
+
     exp_names = (
         EXPERIMENT_NAME if isinstance(EXPERIMENT_NAME, list) else [EXPERIMENT_NAME]
     )
