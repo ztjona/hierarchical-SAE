@@ -415,6 +415,7 @@ def plot_Qv_horizon(
     q_select: torch.Tensor | np.ndarray,
     outcome: torch.Tensor | np.ndarray,
     steps_to_terminal: torch.Tensor | np.ndarray,
+    phase: torch.Tensor | np.ndarray | None = None,
     fig_num: int = 5,
     DISPLAY_PLOT: bool = True,
     position: tuple[int, int] | None = (900, 0),
@@ -428,10 +429,20 @@ def plot_Qv_horizon(
     """Plot taken-action Q-value distributions by exact distance to terminal.
 
     Each panel contains the distribution of the stored taken-action Q-values for
-    one head and one player-perspective outcome. Columns on the x-axis are exact
-    ``steps_to_terminal`` buckets, so each vertical slice answers: among states
-    exactly ``n`` steps from termination, how are the taken-action Q-values
-    distributed?
+    one head and one player-perspective outcome.
+
+    **Joint schema** (``phase=None``): columns on the x-axis are exact
+    ``steps_to_terminal`` buckets.
+
+    **Decoupled-autoregressive schema** (``phase`` provided): the x-axis
+    switches to *joint-turn* index so that Q_place and Q_select for the same
+    player's turn are **vertically aligned**.  In the decoupled schema, even
+    steps are always PHASE_PLACE and odd steps are always PHASE_SELECT.
+    Joint-turn T = step // 2 for place, T = (step + 1) // 2 for select, so the
+    paired actions (place step=2k, select step=2k−1) share the same column T=k.
+    Tick labels show the place-step number for each joint turn.  The terminal
+    turn (step=0) has no paired select, so that Q_select column is shown as
+    white.
     """
 
     def _to_numpy(values: torch.Tensor | np.ndarray) -> np.ndarray:
@@ -458,6 +469,10 @@ def plot_Qv_horizon(
     outcome_np = outcome_np[:batch_size]
     steps_np = steps_np[:batch_size]
 
+    phase_np: np.ndarray | None = None
+    if phase is not None:
+        phase_np = _to_numpy(phase).reshape(-1)[:batch_size].astype(int)
+
     experiment_name = f"{experiment_name}-{fig_num}"
     if plt.fignum_exists(experiment_name):
         fig = plt.figure(experiment_name)
@@ -475,9 +490,6 @@ def plot_Qv_horizon(
         except:
             pass
 
-    # sharey=True but NOT sharex: Q_place and Q_select can have different step
-    # ranges for the same outcome column (e.g. Q_select excludes step=0), so
-    # sharing x would let the second ax.set_xlim overwrite the first and clip data.
     axes = np.asarray(fig.subplots(2, 3, sharex=False, sharey=True))
     fig.suptitle(
         "Taken-Action Q-value Distributions by Horizon\n"
@@ -485,9 +497,7 @@ def plot_Qv_horizon(
         fontsize=14,
     )
 
-    # Fixed y-axis so all panels share the same scale as Q-value bounds.
     hist_range = (-1.0, 1.0)
-
     outcome_columns = [(-1, "Outcome = -1"), (0, "Outcome = 0"), (1, "Outcome = +1")]
     hist_bins = 50
     head_rows = [
@@ -496,86 +506,185 @@ def plot_Qv_horizon(
     ]
     heatmap_artist = None
 
+    # Decoupled schema: precompute per-outcome-column turn mapping.
+    # PHASE_PLACE=0 (even steps), PHASE_SELECT=1 (odd steps).
+    # Joint-turn T: place step s → T = s // 2; select step s → T = (s + 1) // 2.
+    _PHASE_PLACE = 0
+    _PHASE_SELECT = 1
+    col_info: list[dict] = []
+    if phase_np is not None:
+        for outcome_value, _ in outcome_columns:
+            pm = (outcome_np == outcome_value) & (phase_np == _PHASE_PLACE)
+            sm = (outcome_np == outcome_value) & (phase_np == _PHASE_SELECT)
+            ps = np.sort(np.unique(steps_np[pm]).astype(int))  # even steps
+            ss = np.sort(np.unique(steps_np[sm]).astype(int))  # odd steps
+            pt = ps // 2
+            st = (ss + 1) // 2
+            parts = ([pt] if pt.size > 0 else []) + ([st] if st.size > 0 else [])
+            all_T = (
+                np.sort(np.unique(np.concatenate(parts)))
+                if parts
+                else np.array([], dtype=int)
+            )
+            T_to_L = {int(T): int(L) for L, T in enumerate(all_T)}
+            col_info.append(
+                {
+                    "place_mask": pm,
+                    "select_mask": sm,
+                    "place_steps": ps,
+                    "select_steps": ss,
+                    "T_to_L": T_to_L,
+                    "n_turns": len(all_T),
+                    # tick labels are computed per-head at render time
+                }
+            )
+
+    # Colormap with white for NaN columns (no data at that turn for this head).
+    _cmap_nan = plt.cm.summer.copy()
+    _cmap_nan.set_bad(color="white")
+
     for row, (head_name, q_values) in enumerate(head_rows):
         for col, (outcome_value, title) in enumerate(outcome_columns):
             ax = axes[row, col]
-            mask = outcome_np == outcome_value
-            if head_name == "Q_select":
-                # step=0 is the terminal placement — no piece selection follows,
-                # so Q_select is undefined there. Exclude it entirely.
-                mask &= steps_np > 0
-            # Active steps for this exact (head, outcome) combination.
-            _active = steps_np[mask]
-            subplot_steps = (
-                np.sort(np.unique(_active.astype(int)))
-                if _active.size > 0
-                else np.array([], dtype=int)
-            )
 
-            n_steps = max(subplot_steps.size, 1)
-            hist_matrix = np.zeros((hist_bins, n_steps), dtype=float)
-            mean_curve = np.full(n_steps, np.nan, dtype=float)
-            has_valid_samples = False
+            if phase_np is not None:
+                # ---- Decoupled schema: phase-filtered, turn-aligned ----
+                info = col_info[col]
+                n_turns = info["n_turns"]
+                T_to_L = info["T_to_L"]
 
-            for step_idx, step in enumerate(subplot_steps):
-                step_values = q_values[mask & (steps_np == step)]
-                step_values = step_values[np.isfinite(step_values)]
-                if step_values.size == 0:
-                    continue
+                if head_name == "Q_place":
+                    active_mask = info["place_mask"]
+                    active_steps = info["place_steps"]
+                else:
+                    active_mask = info["select_mask"]
+                    active_steps = info["select_steps"]
 
-                has_valid_samples = True
-                hist, _ = np.histogram(
-                    step_values,
-                    bins=hist_bins,
-                    range=hist_range,
-                )
-                hist_matrix[:, step_idx] = (hist / hist.sum()) * 100
-                mean_curve[step_idx] = step_values.mean()
+                has_valid_samples = False
+                if n_turns == 0:
+                    ax.text(
+                        0.5,
+                        0.5,
+                        "No valid samples",
+                        ha="center",
+                        va="center",
+                        transform=ax.transAxes,
+                    )
+                else:
+                    # NaN init: columns without data stay NaN → rendered white.
+                    hist_matrix = np.full((hist_bins, n_turns), np.nan, dtype=float)
+                    for step in active_steps:
+                        step_values = q_values[active_mask & (steps_np == step)]
+                        step_values = step_values[np.isfinite(step_values)]
+                        if step_values.size == 0:
+                            continue
+                        has_valid_samples = True
+                        T = (
+                            int(step) // 2
+                            if head_name == "Q_place"
+                            else (int(step) + 1) // 2
+                        )
+                        L = T_to_L[T]
+                        hist, _ = np.histogram(
+                            step_values, bins=hist_bins, range=hist_range
+                        )
+                        hist_matrix[:, L] = (hist / hist.sum()) * 100
 
-            if has_valid_samples:
-                heatmap_artist = ax.imshow(
-                    hist_matrix,
-                    aspect="auto",
-                    origin="lower",
-                    cmap="summer",
-                    interpolation="nearest",
-                    extent=[
-                        subplot_steps[0] - 0.5,
-                        subplot_steps[-1] + 0.5,
-                        hist_range[0],
-                        hist_range[1],
-                    ],
-                    vmin=0,
-                    vmax=100,
-                )
-                # if np.isfinite(mean_curve).any():
-                #     ax.plot(
-                #         subplot_steps,
-                #         mean_curve,
-                #         color="white",
-                #         linewidth=1.6,
-                #         alpha=0.9,
-                #     )
+                    if has_valid_samples:
+                        heatmap_artist = ax.imshow(
+                            hist_matrix,
+                            aspect="auto",
+                            origin="lower",
+                            cmap=_cmap_nan,
+                            interpolation="nearest",
+                            extent=[-0.5, n_turns - 0.5, hist_range[0], hist_range[1]],
+                            vmin=0,
+                            vmax=100,
+                        )
+                        all_T = sorted(info["T_to_L"].keys())
+                        if head_name == "Q_place":
+                            _tick_labels = [str(int(T) * 2) for T in all_T]
+                        else:
+                            _tick_labels = [str(int(T) * 2 - 1) for T in all_T]
+                        ax.set_xticks(range(n_turns))
+                        ax.set_xticklabels(_tick_labels)
+                        ax.set_xlim(-0.5, n_turns - 0.5)
+                    else:
+                        ax.text(
+                            0.5,
+                            0.5,
+                            "No valid samples",
+                            ha="center",
+                            va="center",
+                            transform=ax.transAxes,
+                        )
+
             else:
-                ax.text(
-                    0.5,
-                    0.5,
-                    "No valid samples",
-                    ha="center",
-                    va="center",
-                    transform=ax.transAxes,
+                # ---- Joint schema: original step-based logic ----
+                mask = outcome_np == outcome_value
+                if head_name == "Q_select":
+                    # step=0 is the terminal placement — no piece selection follows.
+                    mask &= steps_np > 0
+                _active = steps_np[mask]
+                subplot_steps = (
+                    np.sort(np.unique(_active.astype(int)))
+                    if _active.size > 0
+                    else np.array([], dtype=int)
                 )
+                n_steps = max(subplot_steps.size, 1)
+                hist_matrix = np.zeros((hist_bins, n_steps), dtype=float)
+                has_valid_samples = False
+
+                for step_idx, step in enumerate(subplot_steps):
+                    step_values = q_values[mask & (steps_np == step)]
+                    step_values = step_values[np.isfinite(step_values)]
+                    if step_values.size == 0:
+                        continue
+                    has_valid_samples = True
+                    hist, _ = np.histogram(
+                        step_values, bins=hist_bins, range=hist_range
+                    )
+                    hist_matrix[:, step_idx] = (hist / hist.sum()) * 100
+
+                if has_valid_samples:
+                    heatmap_artist = ax.imshow(
+                        hist_matrix,
+                        aspect="auto",
+                        origin="lower",
+                        cmap="summer",
+                        interpolation="nearest",
+                        extent=[
+                            subplot_steps[0] - 0.5,
+                            subplot_steps[-1] + 0.5,
+                            hist_range[0],
+                            hist_range[1],
+                        ],
+                        vmin=0,
+                        vmax=100,
+                    )
+                else:
+                    ax.text(
+                        0.5,
+                        0.5,
+                        "No valid samples",
+                        ha="center",
+                        va="center",
+                        transform=ax.transAxes,
+                    )
+
+                if subplot_steps.size > 0:
+                    ax.set_xticks(subplot_steps)
+                    ax.set_xlim(subplot_steps[0] - 0.5, subplot_steps[-1] + 0.5)
 
             if row == 0:
                 ax.set_title(title)
             if col == 0:
                 ax.set_ylabel(f"{head_name}\nTaken-action Q-value")
             if row == 1:
-                ax.set_xlabel("Steps to terminal  (0 = last move)")
-
-            if subplot_steps.size > 0:
-                ax.set_xticks(subplot_steps)
-                ax.set_xlim(subplot_steps[0] - 0.5, subplot_steps[-1] + 0.5)
+                if phase_np is not None:
+                    ax.set_xlabel("Place step  (0 = last;  Q_select uses place − 1)")
+                else:
+                    ax.set_xlabel("Steps to terminal  (0 = last move)")
             ax.set_ylim(-1, 1)
             ax.invert_xaxis()
             ax.grid(True, alpha=0.2, linestyle=":")
