@@ -57,7 +57,7 @@ from tqdm import tqdm
 # EXPERIMENT_NAME = "KA_coupled"
 # PARAM_NAME = "N_LAST_STATES_INIT"
 
-EXPERIMENT_NAME = "LA_mcSelect"
+
 EXPERIMENT_NAME = "LB_mcSelect"
 PARAM_NAME = "N_LAST_STATES_INIT"
 
@@ -77,9 +77,10 @@ BASELINEs = [
     # {"Aa_replay": [8, 1024]},
     # {"Ab_data": [8]},
     # {"Ab_data": [4, 8, 12]},
-    # {"Aa_replay": [8]},
-    # {"JA_final": [3]},
-    {"LA_mcSelect": [2, 3, 4, 6, 12, 16]},
+    {"Aa_replay": [8]},
+    {"JA_final": [3]},
+    {"LA_mcSelect": [2, 3]},
+    {"MA_tempRegresive": [2, 4]},
 ]
 # BASELINEs = []  # Disable baselines
 
@@ -120,7 +121,14 @@ def _find_chromium():
 
 
 def save_figure_png(fig, png_path, width=1200, height=600):
-    """Save plotly figure as PNG via temp HTML + headless browser screenshot."""
+    """Save plotly figure as PNG, using kaleido if available, else headless browser."""
+    # Try kaleido first (works headlessly without a browser)
+    try:
+        fig.write_image(str(png_path), width=width, height=height, scale=2)
+        return
+    except Exception as e:
+        print(f"⚠ kaleido export failed ({e}). Trying browser fallback.")
+
     browser = _find_chromium()
     if not browser:
         html_path = Path(png_path).with_suffix(".html")
