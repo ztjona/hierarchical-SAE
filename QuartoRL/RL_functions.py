@@ -30,6 +30,7 @@ TRANSITION_SCHEMA_JOINT = "joint"
 TRANSITION_SCHEMA_DECOUPLED_AUTOREG = "decoupled_autoreg"
 
 DECOUPLED_TARGET_TD_PLACE_MC_SELECT = "td_place_mc_select"
+DECOUPLED_TARGET_MC_BOTH = "mc_both"
 DISCOUNT_REWARD_GAMMA = 0.8
 
 PHASE_PLACE = 0
@@ -953,11 +954,16 @@ def DQN_training_step_decoupled_autoreg(
 ):
     """Compute masked per-phase targets for decoupled-autoregressive batches.
 
-    Current target style:
-      - place transitions: TD/Bellman bootstrap into the next select phase
-      - select transitions: Monte Carlo outcome supervision
+    Target styles:
+      - "td_place_mc_select": place uses TD/Bellman bootstrap into the next
+        select phase; select uses Monte Carlo outcome supervision.
+      - "mc_both": both heads use Monte Carlo outcome supervision
+        (gamma^steps_to_terminal * outcome). target_net is not read.
     """
-    if TARGET_STYLE != DECOUPLED_TARGET_TD_PLACE_MC_SELECT:
+    if TARGET_STYLE not in (
+        DECOUPLED_TARGET_TD_PLACE_MC_SELECT,
+        DECOUPLED_TARGET_MC_BOTH,
+    ):
         raise ValueError(f"Unknown decoupled target style {TARGET_STYLE}")
 
     q_values_phase = getattr(policy_net, "q_values_phase", None)
@@ -999,19 +1005,26 @@ def DQN_training_step_decoupled_autoreg(
         q_select_all[select_mask].gather(1, action[select_mask].unsqueeze(1)).squeeze(1)
     )
 
-    expected_place = exp_batch["reward"][place_mask].clone()
-    if place_mask.any():
-        non_terminal_place_mask = place_mask & ~exp_batch["done"]
-        if non_terminal_place_mask.any():
-            with torch.no_grad():
-                next_q_values = target_q_values_phase(
-                    exp_batch["next_state_board"][non_terminal_place_mask],
-                    exp_batch["next_state_aux"][non_terminal_place_mask],
-                    exp_batch["next_phase"][non_terminal_place_mask],
+    if TARGET_STYLE == DECOUPLED_TARGET_MC_BOTH:
+        expected_place = (
+            GAMMA ** exp_batch["steps_to_terminal"][place_mask]
+        ) * exp_batch["outcome"][place_mask]
+    else:
+        expected_place = exp_batch["reward"][place_mask].clone()
+        if place_mask.any():
+            non_terminal_place_mask = place_mask & ~exp_batch["done"]
+            if non_terminal_place_mask.any():
+                with torch.no_grad():
+                    next_q_values = target_q_values_phase(
+                        exp_batch["next_state_board"][non_terminal_place_mask],
+                        exp_batch["next_state_aux"][non_terminal_place_mask],
+                        exp_batch["next_phase"][non_terminal_place_mask],
+                    )
+                    next_valid = exp_batch["next_valid_mask"][non_terminal_place_mask]
+                    next_place_values = _masked_max(next_q_values, next_valid)
+                expected_place[~exp_batch["done"][place_mask]] += (
+                    GAMMA * next_place_values
                 )
-                next_valid = exp_batch["next_valid_mask"][non_terminal_place_mask]
-                next_place_values = _masked_max(next_q_values, next_valid)
-            expected_place[~exp_batch["done"][place_mask]] += GAMMA * next_place_values
 
     expected_select = (
         GAMMA ** exp_batch["steps_to_terminal"][select_mask]
