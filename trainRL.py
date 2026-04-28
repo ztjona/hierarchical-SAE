@@ -39,7 +39,7 @@ logger.info("Imports done.")
 
 # STARTING_NET = "CHECKPOINTS\\Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8\\20260227_1103-Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8_E_5000.pt"
 STARTING_NET = None  # Set to None to start with random weights
-EXPERIMENT_NAME = "Z_tempRegresive"
+EXPERIMENT_NAME = "MC_MCboth"
 CHECKPOINT_FOLDER = f"./CHECKPOINTS/{EXPERIMENT_NAME}/"
 # TRANSITION_SCHEMA options: "joint" or "decoupled_autoreg"
 # Architecture, bot, and schema must be changed together:
@@ -53,9 +53,10 @@ PLAYER_BOT_CLASS = Quarto_autoreg_bot
 # ARCHITECTURE = QuartoCNN              # ← other joint alternatives
 # ARCHITECTURE = QuartoCNN_unbound
 
-# Only used when TRANSITION_SCHEMA = "decoupled_autoreg". Currently only one option is
-# implemented: place uses TD/Bellman, select uses Monte Carlo return.
-DECOUPLED_TARGET_STYLE = "td_place_mc_select"  # Options: "td_place_mc_select"
+# Only used when TRANSITION_SCHEMA = "decoupled_autoreg".
+#   "td_place_mc_select" -> place uses TD/Bellman, select uses Monte Carlo return
+#   "mc_both"            -> both phases use Monte Carlo return
+DECOUPLED_TARGET_STYLE = "mc_both"  # Options: "td_place_mc_select", "mc_both"
 
 
 def estimate_steps_per_match(n_last_states: int, transition_schema: str) -> int:
@@ -64,7 +65,7 @@ def estimate_steps_per_match(n_last_states: int, transition_schema: str) -> int:
     return n_last_states
 
 
-LOSS_APPROACH = "mc_select"  # Options: "combined_avg", "only_select", "only_place", "separate_bellman", "mc_select"
+LOSS_APPROACH = "mc_both"  # Joint-schema only; decoupled_autoreg uses DECOUPLED_TARGET_STYLE
 # REWARD_FUNCTION = "final"  # "final", "propagate", "discount"
 REWARD_FUNCTION = "propagate"  # "final", "propagate", "discount"
 
@@ -119,13 +120,13 @@ TEMPERATURE_EXPLORE = 2  # view test of temperature
 # temperature for exploitation, lower values lead to more exploitation
 TEMPERATURE_EXPLOIT = 0.1
 
-FREQ_EPOCH_SAVING = 30  # save model, figures every n epochs
-CHECKPOINT_FREQ = 30  # save model weights every n epochs; final epoch is always saved
+FREQ_EPOCH_SAVING = 1000  # save model, figures every n epochs
+CHECKPOINT_FREQ = 50  # save model weights every n epochs; final epoch is always saved
 
 
 # Plots are shown every epoch until this number of epochs. After that, only every
 # FREQ_EPOCH_PLOT_SHOW epochs. At the end, all plots are shown again.
-FREQ_EPOCH_PLOT_SHOW = 10  # efectivelty disable
+FREQ_EPOCH_PLOT_SHOW = 100_000  # efectivelty disable
 
 # in iters if >= N_ITERS show epoch lines in loss plot
 SMOOTHING_WINDOW = 10
