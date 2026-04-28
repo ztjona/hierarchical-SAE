@@ -1,0 +1,604 @@
+from utils.logger import logger
+
+logger.info("Starting Importing...")
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torchrl.data.replay_buffers import ReplayBuffer
+from torchrl.data.replay_buffers.storages import LazyTensorStorage
+from torchrl.data.replay_buffers.samplers import SamplerWithoutReplacement
+from bot.CNN_bot import Quarto_bot
+from bot.CNN_autoreg_bot import Quarto_bot as Quarto_autoreg_bot
+from models.CNN1 import QuartoCNN
+from models.CNN_uncoupled import QuartoCNN as QuartoCNN_uncoupled
+from models.CNN_unbound import QuartoCNN as QuartoCNN_unbound
+from models.CNN_autoreg import QuartoCNNAutoreg, QuartoCNNAutoregUnbound
+from QuartoRL import (
+    gen_experience,
+    run_contest,
+    contest_2_win_rate,
+    DQN_training_step,
+    plot_win_rate,
+    plot_loss,
+    plot_grad_norm,
+    plot_boards_comp,
+    plot_Qv_progress,
+    plot_Qv_horizon,
+)
+from tqdm.auto import tqdm
+from pprint import pformat
+import pickle
+from colorama import init, Fore, Style
+import socket
+from os import path
+import matplotlib.pyplot as plt
+
+# ---- PARAMS ----
+logger.info("Imports done.")
+
+# STARTING_NET = "CHECKPOINTS\\Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8\\20260227_1103-Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8_E_5000.pt"
+STARTING_NET = None  # Set to None to start with random weights
+EXPERIMENT_NAME = "MC_MCboth(5)0427_N_LAST_STATES_INIT_12"
+CHECKPOINT_FOLDER = f"./CHECKPOINTS/{EXPERIMENT_NAME}/"
+# TRANSITION_SCHEMA options: "joint" or "decoupled_autoreg"
+# Architecture, bot, and schema must be changed together:
+#   "joint"             → QuartoCNN / QuartoCNN_uncoupled / QuartoCNN_unbound  +  Quarto_bot
+#   "decoupled_autoreg" → QuartoCNNAutoreg / QuartoCNNAutoregUnbound           +  Quarto_autoreg_bot
+TRANSITION_SCHEMA = "decoupled_autoreg"
+ARCHITECTURE = QuartoCNNAutoreg
+PLAYER_BOT_CLASS = Quarto_autoreg_bot
+# ARCHITECTURE = QuartoCNNAutoreg       # ← use with decoupled_autoreg
+# PLAYER_BOT_CLASS = Quarto_autoreg_bot  # ← use with decoupled_autoreg
+# ARCHITECTURE = QuartoCNN              # ← other joint alternatives
+# ARCHITECTURE = QuartoCNN_unbound
+
+# Only used when TRANSITION_SCHEMA = "decoupled_autoreg".
+#   "td_place_mc_select" -> place uses TD/Bellman, select uses Monte Carlo return
+#   "mc_both"            -> both phases use Monte Carlo return
+DECOUPLED_TARGET_STYLE = "mc_both"  # Options: "td_place_mc_select", "mc_both"
+
+
+def estimate_steps_per_match(n_last_states: int, transition_schema: str) -> int:
+    if transition_schema == "decoupled_autoreg":
+        return max(1, 2 * n_last_states - 1)
+    return n_last_states
+
+
+LOSS_APPROACH = "mc_both"  # Joint-schema only; decoupled_autoreg uses DECOUPLED_TARGET_STYLE
+# REWARD_FUNCTION = "final"  # "final", "propagate", "discount"
+REWARD_FUNCTION = "propagate"  # "final", "propagate", "discount"
+
+# if True, experience is generated at the beginning of each epoch
+# if False, experience is generated only at the first epoch and reused for the rest of epochs
+GEN_EXPERIENCE_BY_EPOCH = True
+# GEN_EXPERIENCE_BY_EPOCH = False
+
+N_MATCHES_EVAL = 30  # number of matches to evaluate the bot at the end of each epoch for the selected BASELINES
+
+BATCH_SIZE = 32
+# When True, checks for winning in 2x2 squares. False, only in rows, columns and diagonals.
+mode_2x2 = True
+
+# every epoch experience is generated with a new bot instance, models are saved at the end of each epoch
+EPOCHS = 5_000
+
+# number of last states to consider in the experience generation at the beginning of training
+N_LAST_STATES_INIT = 12
+# number of last states to consider in the experience generation at the end of training. -1 means all states
+N_LAST_STATES_FINAL = N_LAST_STATES_INIT  # No curriculum, constant
+
+MATCHES_PER_EPOCH = 32  # number self-play matches per epoch
+NUM_EPOCHs_BUFFER = 8  # number of epochs to keep in the replay buffer, if GEN_EXPERIENCE_BY_EPOCH is True. If False, this parameter is ignored and only the experience of the first epoch is kept in the buffer.
+
+# Fraction of each training batch that comes from end-game-only experience (n_last_states=2).
+# This anchors the model on states it already knows, preventing catastrophic forgetting
+# during curriculum expansion. 0.0 disables the endgame buffer.
+ENDGAME_FRACTION = 0  # disabled for from-scratch training
+N_LAST_STATES_ENDGAME = 2  # must match pre-trained model's training distribution
+
+# movs per match * #_matches per epoch (max 16, but avg less)
+STEPS_PER_EPOCH = (
+    estimate_steps_per_match(N_LAST_STATES_FINAL, TRANSITION_SCHEMA) * MATCHES_PER_EPOCH
+)
+
+if GEN_EXPERIENCE_BY_EPOCH:
+    # EPOCHs x STEPS_PER_EPOCH
+    # N epochs (DATA from the last)
+    REPLAY_SIZE = NUM_EPOCHs_BUFFER * STEPS_PER_EPOCH
+else:
+    # only STEPS_PER_EPOCH, DATA from the first epoch
+    REPLAY_SIZE = STEPS_PER_EPOCH
+
+# update target network every N gradient updates (soft update with TAU)
+TARGET_UPDATE_FREQ = 3  # every 3 gradient steps
+
+
+# temperature for exploration, higher values lead to more exploration
+TEMPERATURE_EXPLORE = 2  # view test of temperature
+
+# temperature for exploitation, lower values lead to more exploitation
+TEMPERATURE_EXPLOIT = 0.1
+
+FREQ_EPOCH_SAVING = 1000  # save model, figures every n epochs
+CHECKPOINT_FREQ = 50  # save model weights every n epochs; final epoch is always saved
+
+
+# Plots are shown every epoch until this number of epochs. After that, only every
+# FREQ_EPOCH_PLOT_SHOW epochs. At the end, all plots are shown again.
+FREQ_EPOCH_PLOT_SHOW = 100_000  # efectivelty disable
+
+# in iters if >= N_ITERS show epoch lines in loss plot
+SMOOTHING_WINDOW = 10
+
+# Q-value plotting configuration
+Q_PLOT_TYPE = "hist"  # Options: "time_series" or "hist"
+
+# ###########################
+MAX_GRAD_NORM = 1.0
+LR = 7e-4  # match Aa_replay(2)
+LR_F = LR  # not change in LR
+TAU = 0.01  # match Aa_replay(2)
+# TAU = 0.005
+GAMMA = 0.99
+
+# ###########################
+# The bot at the end of each epoch will be evaluated against a limited number of rivals known as BASELINES.
+BASELINES = [
+    {
+        "path": "CHECKPOINTS//LOSS_APPROACHs_1212-2_only_select//20251212_2206-LOSS_APPROACHs_1212-2_only_select_E_1034.pt",
+        "name": "bot_loss-BT",
+        "bot": Quarto_bot,
+        "params": {
+            "deterministic": False,
+            "temperature": 0.1,
+            "model_class": QuartoCNN_uncoupled,
+        },
+    },
+    {
+        "path": "CHECKPOINTS//EXP_id03//20250922_1247-EXP_id03_epoch_0000.pt",
+        "name": "bot_random",
+        "bot": Quarto_bot,
+        "params": {
+            "deterministic": False,
+            "temperature": 0.1,
+            "model_class": QuartoCNN,
+        },
+    },
+]
+
+# ###########################
+logger.info(f"PC name: {socket.gethostname()}")
+logger.info(f"Experiment name:\t{EXPERIMENT_NAME}")
+logger.info(
+    f"Train conf.:\t{EPOCHS=}, {BATCH_SIZE=}, {LR=}, {LR_F=}, {GAMMA=}, {TAU=}, {MAX_GRAD_NORM=}"
+)
+logger.info(f"Exp. gen.:\t{MATCHES_PER_EPOCH=}, {STEPS_PER_EPOCH=}, {REPLAY_SIZE=}")
+logger.info(f"Network updates:\tFull buffer sweep each epoch, {TARGET_UPDATE_FREQ=}")
+logger.info(f"Exploration:\t{TEMPERATURE_EXPLORE=}, {TEMPERATURE_EXPLOIT=}")
+logger.info(f"N_LAST_STATES:\tINIT={N_LAST_STATES_INIT}, FINAL={N_LAST_STATES_FINAL}")
+logger.info(f"Checkpointing:\t{CHECKPOINT_FREQ=}, {FREQ_EPOCH_SAVING=}")
+logger.info(
+    f"ENDGAME_FRACTION={ENDGAME_FRACTION}, N_LAST_STATES_ENDGAME={N_LAST_STATES_ENDGAME}"
+)
+logger.info(f"LOSS_APPROACH={LOSS_APPROACH}")
+logger.info(f"REWARD_FUNCTION={REWARD_FUNCTION}")
+logger.info(f"TRANSITION_SCHEMA={TRANSITION_SCHEMA}")
+logger.info(f"DECOUPLED_TARGET_STYLE={DECOUPLED_TARGET_STYLE}")
+
+# ###########################
+# Unpack baselines into rivals for evaluation
+# limit the number of rivals for evaluation, -1 means no limit
+RIVALS_IN_TOURNAMENT = -1
+RIVALS_NAMEs = [b["name"] for b in BASELINES]
+RIVALS_PATHs = [b["path"] for b in BASELINES]
+RIVALS_CLASS = [b["bot"] for b in BASELINES]
+RIVALS_PARAMs = [b["params"] for b in BASELINES]
+
+win_rate: dict[str | int, list[float]] = {}  # list of win rates of epochs by rival
+q_values_history: dict[str, list] = {
+    "q_place": [],
+    "q_select": [],
+    "rewards": [],  # Kept for backward compatibility with older viewers.
+    "outcome": [],  # Player-perspective winner/loser label for plotting.
+    "steps_to_terminal": [],  # Horizon metadata for Q-value horizon plots.
+}  # Track Q-values over epochs
+
+# ###########################
+torch.manual_seed(5)
+
+# Setup device - use CUDA if available, otherwise CPU
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+logger.info(f"Using device: {device}")
+
+policy_net = ARCHITECTURE()
+target_net = ARCHITECTURE()
+logger.info(f"Architecture: {policy_net.name}")
+
+# Move models to device
+policy_net.to(device)
+target_net.to(device)
+logger.info(f"Models moved to {device}")
+
+# Load starting checkpoint if provided
+if STARTING_NET is not None:
+    logger.info(f"Loading starting checkpoint from: {STARTING_NET}")
+    try:
+        policy_net.load_state_dict(
+            torch.load(STARTING_NET, map_location=device, weights_only=True)
+        )
+        logger.info("Successfully loaded starting checkpoint")
+    except FileNotFoundError:
+        logger.error(f"Checkpoint file not found: {STARTING_NET}")
+        raise
+    except Exception as e:
+        logger.error(f"Error loading checkpoint: {e}")
+        raise
+else:
+    logger.info("Starting with random weights (no checkpoint provided)")
+
+# Set target net weights to policy net weights
+target_net.load_state_dict(policy_net.state_dict())
+
+CKPT_NAME_GEN = lambda epoch: f"{EXPERIMENT_NAME}_E_{epoch:04d}"
+policy_net.export_model(CKPT_NAME_GEN(0), CHECKPOINT_FOLDER)
+
+# ###########################
+replay_buffer = ReplayBuffer(
+    storage=LazyTensorStorage(max_size=REPLAY_SIZE),
+    sampler=SamplerWithoutReplacement(),
+)
+
+# Endgame replay buffer: keeps end-game-only experience to anchor Q-values
+ENDGAME_REPLAY_SIZE = (
+    NUM_EPOCHs_BUFFER
+    * estimate_steps_per_match(N_LAST_STATES_ENDGAME, TRANSITION_SCHEMA)
+    * MATCHES_PER_EPOCH
+)
+endgame_replay_buffer = ReplayBuffer(
+    storage=LazyTensorStorage(max_size=ENDGAME_REPLAY_SIZE),
+    sampler=SamplerWithoutReplacement(),
+)
+
+# ###########################
+optimizer = optim.AdamW(policy_net.parameters(), lr=LR, amsgrad=True)
+
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, EPOCHS, eta_min=LR_F)
+
+# The Huber loss acts like the mean squared error when the error is small, but like the mean absolute error when the error is large - this makes it more robust to outliers when the estimates of Q are very noisy.
+loss_fcn = nn.SmoothL1Loss()
+
+epochs_results = []  # to store the results of each epoch
+loss_data: dict[str, list[float | int]] = {
+    "loss_values": [],
+    "epoch_values": [],  # iter value at the end of each epoch
+}  # to track loss values during training
+grad_norm_data: dict[str, list[float | int]] = {
+    "grad_norm_values": [],  # pre-clip total grad norm per training step
+    "epoch_values": [],  # iter value at the end of each epoch (parallel to loss_data)
+}
+# ###########################
+init(autoreset=True)  # COLORAMA
+
+logger.info("Hyperparameters loaded.")
+logger.info("Starting training...")
+
+# -------------------------- TRAINING LOOP ---------------------------
+step_i = -1  # counter of training steps
+# Outer loop over epochs
+for e in tqdm(
+    range(EPOCHS), desc=f"{Fore.GREEN}Epochs{Style.RESET_ALL}", position=0, leave=True
+):
+    # load models
+    p1 = PLAYER_BOT_CLASS(
+        model=policy_net, deterministic=False, temperature=TEMPERATURE_EXPLORE
+    )
+    p2 = PLAYER_BOT_CLASS(
+        model=policy_net, deterministic=False, temperature=TEMPERATURE_EXPLORE
+    )  # self play
+
+    logger.debug(f"Using temperatures: p1={p1.TEMPERATURE}, p2={p2.TEMPERATURE}")
+
+    # Linearly interpolate n_last_states from N_LAST_STATES_INIT to N_LAST_STATES_FINAL over EPOCHS
+    n_last_states = round(
+        N_LAST_STATES_INIT
+        + (N_LAST_STATES_FINAL - N_LAST_STATES_INIT) * (e / (EPOCHS - 1))
+    )
+    logger.info(f"Using n_last_states={n_last_states} for epoch {e + 1}")
+
+    # if e == 0:
+    #     _MATCHES_PER_EPOCH = MATCHES_PER_EPOCH
+    #     MATCHES_PER_EPOCH =
+    # elif e == 1:
+    #     MATCHES_PER_EPOCH = _MATCHES_PER_EPOCH
+
+    if GEN_EXPERIENCE_BY_EPOCH or e == 0:
+        logger.info("Generating experience for epoch %d", e + 1)
+
+        # ---- GENERATE EXPERIENCE by SELF-PLAY----
+        exp, boards = gen_experience(
+            p1_bot=p1,
+            p2_bot=p2,
+            n_last_states=n_last_states,
+            number_of_matches=MATCHES_PER_EPOCH,
+            mode_2x2=mode_2x2,
+            REWARD_FUNCTION_TYPE=REWARD_FUNCTION,
+            TRANSITION_SCHEMA=TRANSITION_SCHEMA,
+            PROGRESS_MESSAGE=f"{Fore.YELLOW}Generating experience for epoch {e + 1}{Style.RESET_ALL}",
+            COLLECT_BOARDS=True,
+        )
+
+        # ---- GENERATE ENDGAME EXPERIENCE (anchoring) ----
+        if ENDGAME_FRACTION > 0:
+            endgame_exp = gen_experience(
+                p1_bot=p1,
+                p2_bot=p2,
+                n_last_states=N_LAST_STATES_ENDGAME,
+                number_of_matches=MATCHES_PER_EPOCH,
+                mode_2x2=mode_2x2,
+                REWARD_FUNCTION_TYPE=REWARD_FUNCTION,
+                TRANSITION_SCHEMA=TRANSITION_SCHEMA,
+                PROGRESS_MESSAGE=f"{Fore.CYAN}Generating endgame experience for epoch {e + 1}{Style.RESET_ALL}",
+                COLLECT_BOARDS=False,
+            )
+            endgame_replay_buffer.extend(endgame_exp)  # type: ignore
+    else:
+        replay_buffer.empty()
+        logger.info(f"Reusing same previous experience for epoch {e + 1}")
+
+    replay_buffer.extend(exp)  # type: ignore
+
+    iter_per_epoch = max(len(replay_buffer) // BATCH_SIZE, 1)  # full sweep of buffer
+    logger.info(
+        f"Training during epoch {e} with {len(replay_buffer)} experiences, {iter_per_epoch} iterations."
+    )
+    for i in range(iter_per_epoch):
+        # ---- SAMPLE BATCH FROM REPLAY BUFFER ----
+        if ENDGAME_FRACTION > 0 and len(endgame_replay_buffer) > 0:
+            endgame_size = max(1, round(BATCH_SIZE * ENDGAME_FRACTION))
+            curriculum_size = BATCH_SIZE - endgame_size
+            # Sample from both buffers and concatenate
+            endgame_batch = endgame_replay_buffer.sample(
+                min(endgame_size, len(endgame_replay_buffer))
+            )
+            curriculum_batch = replay_buffer.sample(
+                min(curriculum_size, len(replay_buffer))
+            )
+            exp_batch = torch.cat([curriculum_batch, endgame_batch], dim=0)
+        else:
+            exp_batch = replay_buffer.sample(BATCH_SIZE)
+
+        if exp_batch.shape[0] < BATCH_SIZE:
+            logger.warning(
+                f"Not enough data to sample a full batch. Expected {BATCH_SIZE}, got {exp_batch.shape[0]}"
+            )
+            break
+        step_i += 1
+        # ---- TRAINING STEP ----
+        dqn_result = DQN_training_step(
+            policy_net=policy_net,
+            target_net=target_net,
+            exp_batch=exp_batch,  # type: ignore
+            GAMMA=GAMMA,
+            LOSS_APPROACH=LOSS_APPROACH,
+            TRANSITION_SCHEMA=TRANSITION_SCHEMA,
+            DECOUPLED_TARGET_STYLE=DECOUPLED_TARGET_STYLE,
+        )
+        if TRANSITION_SCHEMA == "decoupled_autoreg":
+            q_place, target_place, q_select, target_select = dqn_result  # type: ignore
+            active_losses: list[torch.Tensor] = []
+            if q_place.numel() > 0:
+                active_losses.append(loss_fcn(q_place, target_place))
+            if q_select.numel() > 0:
+                active_losses.append(loss_fcn(q_select, target_select))
+            if not active_losses:
+                raise ValueError(
+                    "Decoupled batch produced no active place/select samples."
+                )
+            loss = torch.stack(active_losses).mean()
+        elif LOSS_APPROACH in ("separate_bellman", "mc_select"):
+            # Per-head losses: separate_bellman → Bellman targets both heads;
+            # mc_select → Bellman for Q_place, Monte Carlo return for Q_select.
+            q_place, target_place, q_select, target_select = dqn_result  # type: ignore
+            loss = (
+                loss_fcn(q_place, target_place) + loss_fcn(q_select, target_select)
+            ) / 2
+        else:
+            state_action_values, expected_state_action_values = dqn_result  # type: ignore
+            loss = loss_fcn(state_action_values, expected_state_action_values)
+        loss_data["loss_values"].append(loss.item())
+
+        # Optimize the model
+        optimizer.zero_grad()
+        loss.backward()
+
+        # Optimization: grad clipping and optimization step
+        # this is not strictly mandatory but it's good practice to keep
+        # your gradient norm bounded
+        # clip_grad_value_ NOT USED!
+        total_norm = torch.nn.utils.clip_grad_norm_(
+            policy_net.parameters(), MAX_GRAD_NORM
+        )
+        grad_norm_data["grad_norm_values"].append(float(total_norm))
+        if total_norm > MAX_GRAD_NORM:
+            logger.warning(
+                f"Gradient clipping activated! Total norm before clipping: {total_norm:.4f}"
+            )
+        optimizer.step()
+        # optimizer.zero_grad() # in PPO
+
+        # ----------- Update target network
+        if (i + 1) % TARGET_UPDATE_FREQ == 0:  # +1 to not update at step 0
+            target_net_state_dict = target_net.state_dict()
+            policy_net_state_dict = policy_net.state_dict()
+            for key in policy_net_state_dict:
+                target_net_state_dict[key] = policy_net_state_dict[
+                    key
+                ] * TAU + target_net_state_dict[key] * (1 - TAU)
+            target_net.load_state_dict(target_net_state_dict)
+            target_net.eval()  # Ensure target network stays in eval mode
+
+    # ------- END OF EPOCH -------
+    q_place, q_select = p1.evaluate(exp)
+
+    q_values_history["q_place"].append(
+        q_place.detach().cpu().tolist() if hasattr(q_place, "detach") else q_place
+    )
+    q_values_history["q_select"].append(
+        q_select.detach().cpu().tolist() if hasattr(q_select, "detach") else q_select
+    )
+    # Save rewards (only once, they're the same across epochs for the same exp batch)
+    if len(q_values_history["rewards"]) == 0:
+        reward = exp["reward"]
+        q_values_history["rewards"].append(
+            reward.detach().cpu().tolist() if hasattr(reward, "detach") else reward
+        )
+    if len(q_values_history["outcome"]) == 0:
+        outcome = exp["outcome"]
+        q_values_history["outcome"].append(
+            outcome.detach().cpu().tolist() if hasattr(outcome, "detach") else outcome
+        )
+    if len(q_values_history["steps_to_terminal"]) == 0:
+        steps_to_terminal = exp["steps_to_terminal"]
+        q_values_history["steps_to_terminal"].append(
+            steps_to_terminal.detach().cpu().tolist()
+            if hasattr(steps_to_terminal, "detach")
+            else steps_to_terminal
+        )
+
+    loss_data["epoch_values"].append(step_i)
+    grad_norm_data["epoch_values"].append(step_i)
+
+    # We're also using a learning rate scheduler. Like the gradient clipping,
+    # this is a nice-to-have but nothing necessary for PPO to work.
+    scheduler.step()
+    logger.info(f"Current learning rate: {scheduler.get_last_lr()[0]}")
+
+    # ------- RUN CONTEST -----------
+    # modify the bots to use different temperatures for exploration and exploitation
+    # Ignore the last epoch, as it is the current model
+
+    # Always False!
+    # p1.DETERMINISTIC = False  # When True always repeat moves, is like only 1 game!
+    # assert not p1.DETERMINISTIC, "p1 bot should be non-deterministic for evaluation"
+    p1.TEMPERATURE = TEMPERATURE_EXPLOIT
+
+    contest_results = run_contest(
+        player=p1,
+        rivals=RIVALS_PATHs,
+        rival_class=RIVALS_CLASS,
+        rival_options=RIVALS_PARAMs,
+        rivals_clip=RIVALS_IN_TOURNAMENT,  # limit the number of rivals for evaluation, -1 means no limit
+        rival_names=RIVALS_NAMEs,
+        matches=N_MATCHES_EVAL,
+        verbose=False,
+        mode_2x2=mode_2x2,
+        PROGRESS_MESSAGE=f"{Fore.MAGENTA}Running contest for epoch {e + 1}{Style.RESET_ALL}",
+    )
+    logger.info(f"Contest results after epoch {e + 1}")
+    logger.info(contest_results)
+    logger.info(pformat(contest_results))
+
+    for rival_name, wr in contest_2_win_rate(contest_results).items():
+        if rival_name not in win_rate:
+            win_rate[rival_name] = []
+        win_rate[rival_name].append(wr)
+
+    # ------- SAVE RESULTS -----------
+    # --- Save the model only at the configured checkpoint cadence
+    if (CHECKPOINT_FREQ > 0 and (e + 1) % CHECKPOINT_FREQ == 0) or (e + 1) == EPOCHS:
+        _fname = CKPT_NAME_GEN(e + 1)
+        policy_net.export_model(_fname, checkpoint_folder=CHECKPOINT_FOLDER)
+
+    # ------ Store results
+    epochs_results.append(dict(contest_results))
+
+    if (FREQ_EPOCH_SAVING > 0 and (e + 1) % FREQ_EPOCH_SAVING == 0) or (
+        e + 1
+    ) == EPOCHS:
+        logger.info("Saving results to disk...")
+        pkl_path = path.join(CHECKPOINT_FOLDER, f"{EXPERIMENT_NAME}.pkl")
+        with open(pkl_path, "wb") as f:
+            pickle.dump(
+                {
+                    "epochs_results": epochs_results,
+                    "loss_values": loss_data,
+                    "grad_norm_data": grad_norm_data,
+                    "win_rate": win_rate,
+                    "q_values_history": q_values_history,
+                },
+                f,
+            )
+
+    # ------- PLOT RESULTS -----------
+    if (e + 1) % FREQ_EPOCH_PLOT_SHOW == 0 or (e + 1) == EPOCHS:
+        logger.debug("Plotting results...")
+        plot_boards_comp(
+            *boards,
+            q_place=q_place,
+            q_select=q_select,
+            experiment_name=EXPERIMENT_NAME,
+            FREQ_EPOCH_SAVING=FREQ_EPOCH_SAVING,
+            FOLDER_SAVE=CHECKPOINT_FOLDER,
+            current_epoch=e + 1,
+        )
+
+        plot_Qv_progress(
+            q_values_history,
+            exp["outcome"],
+            fig_num=4,
+            DISPLAY_PLOT=True,
+            done_v=exp["done"],
+            PLOT_TYPE=Q_PLOT_TYPE,
+            group_label="Outcome",
+            experiment_name=EXPERIMENT_NAME,
+            FREQ_EPOCH_SAVING=FREQ_EPOCH_SAVING,
+            FOLDER_SAVE=CHECKPOINT_FOLDER,
+            current_epoch=e + 1,
+        )
+
+        plot_Qv_horizon(
+            q_place,
+            q_select,
+            exp["outcome"],
+            exp["steps_to_terminal"],
+            phase=exp.get("phase", None),
+            fig_num=5,
+            DISPLAY_PLOT=True,
+            experiment_name=EXPERIMENT_NAME,
+            FREQ_EPOCH_SAVING=FREQ_EPOCH_SAVING,
+            FOLDER_SAVE=CHECKPOINT_FOLDER,
+            current_epoch=e + 1,
+        )
+
+        plot_win_rate(
+            *win_rate.items(),
+            FREQ_EPOCH_SAVING=FREQ_EPOCH_SAVING,
+            FOLDER_SAVE=CHECKPOINT_FOLDER,
+            SMOOTHING_WINDOW=SMOOTHING_WINDOW,
+            DISPLAY_PLOT=True,
+            experiment_name=EXPERIMENT_NAME,
+        )
+
+        plot_loss(
+            loss_data,
+            FREQ_EPOCH_SAVING=FREQ_EPOCH_SAVING,
+            FOLDER_SAVE=CHECKPOINT_FOLDER,
+            DISPLAY_PLOT=True,
+            experiment_name=EXPERIMENT_NAME,
+        )
+
+        plot_grad_norm(
+            grad_norm_data,
+            MAX_GRAD_NORM=MAX_GRAD_NORM,
+            FREQ_EPOCH_SAVING=FREQ_EPOCH_SAVING,
+            FOLDER_SAVE=CHECKPOINT_FOLDER,
+            DISPLAY_PLOT=True,
+            experiment_name=EXPERIMENT_NAME,
+        )
+        logger.debug("Plots updated.")
+
+
+logger.info("Training completed.")
+
+plt.show(block=True)
