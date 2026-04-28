@@ -91,6 +91,7 @@ CHECKPOINT_BASE = "./CHECKPOINTS/"
 PLOT_CONFIG = {
     "loss": True,
     "win_rate": True,
+    "grad_norm": True,
 }
 
 
@@ -624,6 +625,86 @@ def plot_losses(all_data, folders):
     return fig
 
 
+def plot_grad_norms(all_data, folders, clip_value=1.0):
+    """Create interactive Plotly plot for pre-clip gradient norm comparison."""
+    fig = go.Figure()
+
+    colors = assign_colors(folders)
+    smoothing_window = 50
+
+    for idx, (folder_info, data) in enumerate(zip(folders, all_data)):
+        if data is None:
+            continue
+
+        gn_data = data.get("grad_norm_data")
+        if not gn_data:
+            continue
+
+        grad_norm_values = to_numpy(gn_data["grad_norm_values"])
+        epoch_boundaries = to_numpy(gn_data.get("epoch_values", []))
+        param_value = folder_info["param_value"]
+        is_baseline = folder_info.get("is_baseline", False)
+        exp_name = folder_info.get("experiment", "")
+
+        if len(grad_norm_values) > smoothing_window:
+            smoothed = np.convolve(
+                grad_norm_values,
+                np.ones(smoothing_window) / smoothing_window,
+                mode="valid",
+            )
+        else:
+            smoothed = grad_norm_values
+
+        if len(epoch_boundaries) > 0:
+            iter_indices = np.arange(len(smoothed))
+            x_values = np.searchsorted(epoch_boundaries, iter_indices, side="left")
+        else:
+            x_values = list(range(len(smoothed)))
+
+        line_style = "dot" if is_baseline else "solid"
+        opacity = 0.6 if is_baseline else 0.8
+        width = 2.0 if is_baseline else 2.5
+        name_prefix = f"[{exp_name}] " if is_baseline else ""
+        label_param = folder_info.get("param_name", PARAM_NAME)
+        param_str = format_param_value(param_value)
+
+        fig.add_trace(
+            go.Scatter(
+                x=x_values,
+                y=smoothed,
+                mode="lines",
+                name=f"{name_prefix}{label_param}={param_str}",
+                line=dict(color=colors[idx], width=width, dash=line_style),
+                opacity=opacity,
+                hovertemplate=f"<b>{name_prefix}{label_param}={param_str}</b><br>Epoch: %{{x}}<br>Grad Norm: %{{y:.4f}}<extra></extra>",
+            )
+        )
+
+    # Reference line at clip threshold
+    if clip_value is not None:
+        fig.add_hline(
+            y=clip_value,
+            line_dash="dash",
+            line_color="red",
+            opacity=0.5,
+            annotation_text=f"clip={clip_value}",
+            annotation_position="right",
+        )
+
+    fig.update_layout(
+        title=f"Gradient Norm (pre-clip) Comparison - {EXPERIMENT_NAME}",
+        xaxis_title="Epoch",
+        yaxis_title="Grad Norm (Smoothed)",
+        hovermode="x unified",
+        template="plotly_white",
+        autosize=True,
+        legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99),
+        margin=dict(l=60, r=20, t=50, b=50),
+    )
+
+    return fig
+
+
 def plot_win_rates(all_data, folders):
     """Create interactive Plotly plots for win rate comparison against each rival.
 
@@ -788,15 +869,21 @@ def main():
     results_dir = Path("results") / exp_filename
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    print("\nGenerating loss and win rate plots...")
+    print("\nGenerating loss, grad norm and win rate plots...")
 
     fig_loss = plot_losses(all_data, folders)
+    fig_gn = plot_grad_norms(all_data, folders) if PLOT_CONFIG.get("grad_norm") else None
     fig_wr = plot_win_rates(all_data, folders)
 
-    # Save as PNG via headless browser screenshot
+    # Save as PNG
     loss_path = results_dir / f"comparison_loss_{exp_filename}.png"
     save_figure_png(fig_loss, loss_path)
     print(f"✓ Loss plot saved ({loss_path})")
+
+    if fig_gn is not None:
+        gn_path = results_dir / f"comparison_grad_norm_{exp_filename}.png"
+        save_figure_png(fig_gn, gn_path)
+        print(f"✓ Grad norm plot saved ({gn_path})")
 
     if fig_wr is not None:
         wr_path = results_dir / f"comparison_win_rate_{exp_filename}.png"
@@ -811,6 +898,8 @@ def main():
     print(f"\n✓ All plots saved to: {results_dir}/")
     print("\nOpening plots in browser...")
     fig_loss.show(renderer="browser")
+    if fig_gn is not None:
+        fig_gn.show(renderer="browser")
     if fig_wr is not None:
         fig_wr.show(renderer="browser")
 
