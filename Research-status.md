@@ -553,17 +553,117 @@ Compared to the joint `LA_mcSelect` baseline:
 
 ---
 
-## Pending: MB_final — Decoupled-Autoreg with Final Reward
+## MB_final — Decoupled-Autoreg with Final Reward (N_LAST_STATES sweep)
 
-**Hypothesis:** With `REWARD_FUNCTION="final"`, intermediate place transitions get reward `0` instead of ±1, so the place TD target becomes `γ · max_a' Q_select(s', a')` — bounded in `[−γ, +γ]` and reachable under `tanh`. This should remove the loss floor observed in `MA_tempRegresive` (the `propagate + tanh + bootstrap` double-counting issue) without re-coupling the heads. If it works, the bimodal Q_place pathology should disappear and N=2 should at least match the joint LA_mcSelect baseline.
+**Question:** Does `REWARD_FUNCTION="final"` remove the unreachable-target loss floor seen in `MA_tempRegresive`? Under `propagate`, the place TD target is `±1 + γ · max_a' Q_select(s', a') ≈ ±2`, unreachable under `tanh`. Under `final` it becomes `0 + γ · max_a' Q_select(s', a')`, bounded in `[−γ, +γ]`.
 
-**Sweep:** `N_LAST_STATES_INIT` ∈ {2, 3, 4, 6, 12, 16} — same grid as MA_tempRegresive for direct comparison.
+**Code change vs MA:** only `REWARD_FUNCTION` changes from `"propagate"` to `"final"`.
 
-**Fixed:** `STARTING_NET=None`, `EPOCHS=5000`, `NUM_EPOCHs_BUFFER=8`, `LR=7e-4`, `TAU=0.01`, `GAMMA=0.99`, `ARCHITECTURE=QuartoCNNAutoreg`, `TRANSITION_SCHEMA="decoupled_autoreg"`, `DECOUPLED_TARGET_STYLE="td_place_mc_select"`, `LOSS_APPROACH="mc_select"`, `REWARD_FUNCTION="final"`.
+| Run | N_LAST_STATES_INIT | Epochs |
+|-----|---------------------|--------|
+| MB_final(1) | 2 | 5000 |
+| MB_final(2) | 3 | 5000 |
+| MB_final(3) | 4 | 5000 |
+| MB_final(4) | 6 | 4050 |
+| MB_final(5) | 12 | 2500 |
+| MB_final(6) | 16 | 2000 |
+
+**Fixed:** `STARTING_NET=None`, `NUM_EPOCHs_BUFFER=8`, `LR=7e-4`, `TAU=0.01`, `GAMMA=0.99`, `ARCHITECTURE=QuartoCNNAutoreg`, `TRANSITION_SCHEMA="decoupled_autoreg"`, `DECOUPLED_TARGET_STYLE="td_place_mc_select"`, `LOSS_APPROACH="mc_select"`, `REWARD_FUNCTION="final"`.
+
+**Result:**
+
+| N | Final loss | Final WR vs bot_loss-BT | Final WR vs bot_random | MA Δ vs bot_loss-BT |
+|---|---|---|---|---|
+| 2 | 0.112 | 66.9% | 80.5% | **+10.9pp vs MA** |
+| 3 | 0.221 | 45.8% | 64.8% | +4.0pp |
+| 4 | 0.237 | 56.2% | 74.0% | +6.5pp |
+| 6 | 0.216 | 43.8% | 65.8% | +2.8pp |
+| 12 | 0.192 | 34.2% | 54.7% | −0.3pp |
+| 16 | 0.179 | 32.3% | 54.3% | −0.4pp |
+
+The reward gain is monotonically larger as N decreases — exactly the signature predicted if the unreachable-target pathology dominated at small N and was washed out by other failures at large N. **N=2 fully matches the best joint baseline `LA_mcSelect(1)` (65.2% / 80.9%) within noise**, recovering the N=2 sweet spot that decoupled-autoreg lost in MA.
+
+**Key diagnostic findings (qv panels):**
+
+1. **MA's bimodal Q_place pathology is gone.** No more spurious `+1` band on Outcome=−1 panels. The `propagate + tanh + bootstrap` double-counting failure is fully resolved.
+2. **At N=2, Q_place is correctly bimodal**: Outcome=−1 → ~−1, Outcome=+1 → ~+1. Direct evidence the place head learns terminal value when given reachable targets.
+3. **At N≥3, Q_place collapses to a single horizon-invariant band**, drifting from ~+0.10 (N=4) up to ~+0.30 (N=16). Both Outcome=−1 and Outcome=+1 panels overlap. Not bimodal anymore — a *different* failure mode than MA.
+4. **Q_select stays flat at ~0 for both outcomes at N≥3** — same as MA. Decoupling + reward fix did not unlock the select head.
+5. **Horizon plots (qv_horizon)** show no horizon-conditional shape at N≥3. A correctly-trained MC value function should show |Q| ≈ 1 at terminal step decaying toward 0 with horizon. MB shows a flat band with mild *variance* growth at deep horizons but no shift in the band's center. The model has converged to a horizon-marginal expected return rather than learning a temporal value function. Confirmed `steps_to_terminal` is not fed into the trunk (only `state_board`, `state_aux`, and the phase embedding) — but board fullness is a coarse proxy and the network is not making use of it.
+6. **Grad norm telemetry** (`plot_grad_norm`) shows total gradient norm staying well below the `MAX_GRAD_NORM=1.0` clip threshold across all runs — unlike MA(N=2) which occasionally activated clipping. Consistent with select-head saturation: the small select-head gradient is invisible in the summed total.
+
+**Conclusion:**
+- ✓ Hypothesis confirmed at N=2: reward design was the dominant failure mode there. Loss floor reduced ~3× (0.314 → 0.112) and WR fully matches the best joint baseline.
+- ✗ N-cliff persists for N≥3. MB shows that even with reachable targets, Q_place cannot separate by outcome at non-terminal-only depths. The post-MA bimodal pathology was a symptom of one specific double-counting issue, not the underlying credit-assignment problem.
+- **Next move (per pre-registered decision gate):** if the floor persists, the issue is bootstrap-through-Q_select coupling. Next step is `MC_*` with MC targets on both heads (no place TD), to sever Q_place's dependency on Q_select.
+
+---
+
+## MC_MCboth — Full Monte Carlo on Both Heads (N_LAST_STATES sweep)
+
+**Question:** Is Q_place's flat-band failure at N≥3 caused by being supervised through a poorly-anchored Q_select via the place TD bootstrap target? If so, replacing the Bellman bootstrap with a direct MC target (`γ^k · outcome`) on Q_place — same formula already used for Q_select — should let Q_place separate by outcome regardless of what Q_select does.
+
+**Code change vs MB:**
+- New `DECOUPLED_TARGET_STYLE="mc_both"` in `QuartoRL/RL_functions.py` → `DQN_training_step_decoupled_autoreg`.
+- When active, place target = `γ^steps_to_terminal · outcome` (same formula as the select target). The target net is no longer read by the loss (still updated, just unused — minimal-diff).
+
+| Run | N_LAST_STATES_INIT | Epochs |
+|-----|---------------------|--------|
+| MC_MCboth(1) | 2 | 5000 |
+| MC_MCboth(2) | 3 | 4000 |
+| MC_MCboth(3) | 4 | 4000 |
+| MC_MCboth(4) | 6 | 3000 |
+| MC_MCboth(5) | 12 | 2000 |
+| MC_MCboth(6) | 16 | 1000 |
+
+**Fixed:** Identical to MB except `DECOUPLED_TARGET_STYLE="mc_both"`.
+
+**Result vs MB head-to-head:**
+
+| N | MB Final WR vs BT | MC Final WR vs BT | Δ | MB loss | MC loss |
+|---|---|---|---|---|---|
+| 2 | 66.9% | 66.7% | ~tied | 0.112 | 0.105 |
+| 3 | 45.8% | 44.7% | ~tied | 0.221 | 0.377 |
+| 4 | 56.2% | 47.1% | **−9.1pp** | 0.237 | 0.384 |
+| 6 | 43.8% | 39.5% | −4.3pp | 0.216 | 0.397 |
+| 12 | 34.2% | 34.4% | ~tied | 0.192 | 0.369 |
+| 16 | 32.3% | 32.5% | ~tied | 0.179 | 0.349 |
+
+Removing the Q_place bootstrap **hurts at N=4 / N=6** and ties everywhere else.
+
+**Key diagnostic findings:**
+
+1. **N=2 matches MB exactly** (66.7% vs 66.9%, identical qv plots). Expected: at N=2 the formulations are mathematically equivalent — only terminal place transitions exist, where `R + γ · 0 = outcome = γ^0 · outcome`. Sanity check passes.
+2. **At N≥3, Q_place still collapses to a horizon-invariant band**, visually identical to MB. Direct MC supervision did NOT unlock outcome separation on Q_place. The bootstrap-dependency hypothesis is **falsified**: Q_place fails to fit the outcome at deep horizons even when given the MC target directly.
+3. **Q_select stays flat at ~0 across N≥3**, same as MB. Removing Q_place's dependency on Q_select did not free Q_select either — its failure is intrinsic, not a coupling artifact.
+4. **MC's higher loss at N≥3 is more truthful, not worse learning.** Under MB, when both heads collapse to ~0, the bootstrap target `0 + γ · 0 = 0` becomes a self-fulfilling fixed point (loss looks small because the model agrees with its own broken estimate). Under MC, the target is `γ^k · outcome` ∈ [±0.85, ±1] and the model is asked to predict large signed values, fails, and loss exposes that failure. **MB's lower loss should not be read as a positive signal in retrospect.**
+5. **The bootstrap was doing weak useful regularization** at intermediate N: when both heads sit near 0, MB's bootstrap target stays near 0 and SmoothL1 says "stay put", preserving the slight partial signal. MC removes that and the partial signal degrades into noise — explaining the N=4 / N=6 regression.
+
+**Conclusion:**
+- ✗ Bootstrap-dependency hypothesis falsified. Q_place's flat-band failure at N≥3 is not caused by being supervised through Q_select. The pathology survives direct MC supervision unchanged.
+- ✓ The failure is signal/representation, not target design. The model cannot fit `γ^k · outcome` targets at non-zero horizons even when handed them directly. This is consistent with the prior gradient-magnitude diagnostic (Nexus note on a different checkpoint): tanh saturation collapses select-trunk gradient ~280× relative to place; the MC switch was *expected* to revive select-head gradient but the qv plots show it did not.
+- **Next move:** the only major candidate left is the saturation hypothesis itself. Test unbounded heads (`MD_unbound`), forking from MB (the better baseline), with per-head trunk grad-norm telemetry added so we can *measure* whether unbounded heads revive the select-side gradient.
+
+---
+
+## Pending: MD_unbound — Unbounded Decoupled-Autoreg Heads
+
+**Hypothesis:** Q_place's flat-band failure at N≥3 (surviving both reward-design and target-design fixes) is caused by `tanh` saturation collapsing the select-head trunk gradient (~280× ratio per the prior Nexus diagnostic on a joint checkpoint). Removing `tanh` from both heads should let select-side gradient reach the trunk and let Q_place fit horizon-conditional MC bootstrap targets at N≥3. Forks from MB (the better-performing target style at the informative middle-N buckets), not MC.
+
+**Code change vs MB:** only the architecture switches from `QuartoCNNAutoreg` to `QuartoCNNAutoregUnbound` (already exists in `models/CNN_autoreg.py`). Output activation goes from `tanh` to identity; everything else identical.
+
+**Sweep:** `N_LAST_STATES_INIT` ∈ {2, 3, 4, 6, 12, 16}.
+
+**Fixed:** Identical to MB except `ARCHITECTURE=QuartoCNNAutoregUnbound`. `DECOUPLED_TARGET_STYLE="td_place_mc_select"`, `REWARD_FUNCTION="final"`, `LOSS_APPROACH="mc_select"`.
+
+**Risk note:** `IA_unbound` (joint, propagate, separate_bellman) diverged. The mitigations here vs IA: `final` instead of `propagate` (smaller place targets), MC on Q_select (no Bellman self-bootstrap → Q_select target is bounded by data, ∈[−1, 1]). Q_place still bootstraps through `max_a' Q_select`, which is bounded *only if* Q_select learns its bounded target — if Q_select grows under unbounded heads, Q_place can blow up too. Watch N=2 first; if it diverges, pivot to `mc_both + unbounded` (`ME_*`) to remove all bootstrap chains.
+
+**Diagnostic addition:** per-head trunk gradient norm logged once per epoch — `grad_norm_place_trunk` and `grad_norm_select_trunk`. The ratio is the load-bearing measurement: the saturation hypothesis predicts the ratio rises substantially toward 1.0 when tanh is removed. If the ratio stays small even without tanh, saturation is not the dominant cause and we have to look elsewhere (e.g. data distribution, capacity, or shared-trunk interference under the autoreg topology).
 
 **Decision gate:**
-- **If loss floor disappears at N=2 (target ~0.05) and Q_place outcome=−1 stops showing the +1 band** → reward design was the dominant failure mode; proceed to characterize the schema's N-tolerance properly.
-- **If the floor persists** → the issue is not the reward but the bootstrap-through-Q_select coupling itself; next step is `MC_*` with MC targets on both heads (no place TD), or revisit LR/grad-norm telemetry now that `plot_grad_norm` is wired.
+- **If N=2 holds at MB(1)'s 66.9% / 80.5% AND N=4 Q_place qv panel shows visible outcome separation AND grad_norm ratio rises into [0.1, 1.0]** → saturation was the bottleneck. Characterize the new N tolerance.
+- **If training diverges at N=2** → unbounded heads are too unstable in this setup; pivot to `ME_*` (mc_both + unbounded).
+- **If training is stable but Q_place still flat at N≥3 AND grad ratio stays small** → saturation is not the bottleneck either. The remaining candidates are data-distribution (deeper-horizon transitions are systematically biased) or shared-trunk interference under the phase-embedding topology.
 
 ---
 
