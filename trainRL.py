@@ -39,14 +39,14 @@ logger.info("Imports done.")
 
 # STARTING_NET = "CHECKPOINTS\\Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8\\20260227_1103-Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8_E_5000.pt"
 STARTING_NET = None  # Set to None to start with random weights
-EXPERIMENT_NAME = "MC_MCboth"
+EXPERIMENT_NAME = "MD_unbound"
 CHECKPOINT_FOLDER = f"./CHECKPOINTS/{EXPERIMENT_NAME}/"
 # TRANSITION_SCHEMA options: "joint" or "decoupled_autoreg"
 # Architecture, bot, and schema must be changed together:
 #   "joint"             → QuartoCNN / QuartoCNN_uncoupled / QuartoCNN_unbound  +  Quarto_bot
 #   "decoupled_autoreg" → QuartoCNNAutoreg / QuartoCNNAutoregUnbound           +  Quarto_autoreg_bot
 TRANSITION_SCHEMA = "decoupled_autoreg"
-ARCHITECTURE = QuartoCNNAutoreg
+ARCHITECTURE = QuartoCNNAutoregUnbound
 PLAYER_BOT_CLASS = Quarto_autoreg_bot
 # ARCHITECTURE = QuartoCNNAutoreg       # ← use with decoupled_autoreg
 # PLAYER_BOT_CLASS = Quarto_autoreg_bot  # ← use with decoupled_autoreg
@@ -56,7 +56,7 @@ PLAYER_BOT_CLASS = Quarto_autoreg_bot
 # Only used when TRANSITION_SCHEMA = "decoupled_autoreg".
 #   "td_place_mc_select" -> place uses TD/Bellman, select uses Monte Carlo return
 #   "mc_both"            -> both phases use Monte Carlo return
-DECOUPLED_TARGET_STYLE = "mc_both"  # Options: "td_place_mc_select", "mc_both"
+DECOUPLED_TARGET_STYLE = "td_place_mc_select"  # Options: "td_place_mc_select", "mc_both"
 
 
 def estimate_steps_per_match(n_last_states: int, transition_schema: str) -> int:
@@ -65,9 +65,8 @@ def estimate_steps_per_match(n_last_states: int, transition_schema: str) -> int:
     return n_last_states
 
 
-LOSS_APPROACH = "mc_both"  # Joint-schema only; decoupled_autoreg uses DECOUPLED_TARGET_STYLE
-# REWARD_FUNCTION = "final"  # "final", "propagate", "discount"
-REWARD_FUNCTION = "propagate"  # "final", "propagate", "discount"
+LOSS_APPROACH = "mc_select"  # Joint-schema only; decoupled_autoreg uses DECOUPLED_TARGET_STYLE
+REWARD_FUNCTION = "final"  # "final", "propagate", "discount"
 
 # if True, experience is generated at the beginning of each epoch
 # if False, experience is generated only at the first epoch and reused for the rest of epochs
