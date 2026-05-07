@@ -687,7 +687,7 @@ Removing the Q_place bootstrap **hurts at N=4 / N=6** and ties everywhere else.
 
 ---
 
-## Pending: ME_endgame — Endgame Anchor Buffer (ENDGAME_FRACTION sweep)
+## ME_endgame — Endgame Anchor Buffer (ENDGAME_FRACTION sweep)
 
 **Hypothesis:** Maintaining a separate endgame replay buffer (N=2 experience) alongside a curriculum buffer expanding from N=2 to N=4 prevents catastrophic forgetting of the terminal-state Q_place anchor while simultaneously exposing the model to mid-game states.
 
@@ -703,11 +703,36 @@ Removing the Q_place bootstrap **hurts at N=4 / N=6** and ties everywhere else.
 
 **Fixed:** `ARCHITECTURE=QuartoCNNAutoreg`, `TRANSITION_SCHEMA="decoupled_autoreg"`, `DECOUPLED_TARGET_STYLE="td_place_mc_select"`, `REWARD_FUNCTION="final"`, `STARTING_NET=None`, `LR=7e-4`, `TAU=0.01`, `EPOCHS=5000`, `MATCHES_PER_EPOCH=32`.
 
-**Compare to:** MB_final(3) (N=4, no endgame anchor, 56.2% WR vs bot_loss-BT). If endgame anchoring works, the N=4 run here should stay closer to MB(1)'s 66.9%.
+**Compare to:** MB_final(1) (N=2, 66.9% WR) and MB_final(3) (N=4, 56.2% WR).
+
+**Result:**
+
+| Run | ENDGAME_FRACTION | last-100 WR vs bot_loss-BT | last-100 WR vs bot_random | peak WR vs BT |
+|-----|---|---|---|---|
+| ME(1) | 0.25 | **69.8%** | 85.7% | 93.3% |
+| **ME(2)** | **0.50** | **73.4%** | **85.8%** | **96.7%** |
+| ME(3) | 0.75 | 68.6% | 83.9% | 93.3% |
+
+ME(2) is the **new WR champion** — first genuine improvement over MB(1) since the M-series began (+6.5pp last-100 BT, +5.1pp random).
+
+**Key diagnostic findings (qv panels):**
+
+1. **Q_place at N=2 (endgame buffer): clearly bimodal throughout.** Outcome=−1 band stays near −1; Outcome=+1 band stays near +1. The endgame anchor successfully maintains the terminal-state value anchor that catastrophic forgetting destroyed in Ac_fineShallow.
+2. **Q_place in the curriculum (N=2→4): transitions but does not fully separate.** Beyond epoch ~1300 when N begins to grow, Q_place loses the tight bimodal structure. Still better than MB at the same N.
+3. **Q_select: Outcome=+1 panel shows "No valid samples" even at final epoch (N=4).** This is unexpected — at N≥3 the decoupled-autoreg schema should include winner-side select transitions with Outcome=+1. The qv_progress Outcome=+1 panel for Q_select is nearly empty for the entire run, including the N=3/4 phase (epochs 2500–5000). **Possible schema bug: winner-side select transitions may not be labeled Outcome=+1 in the experience tuple.** This would explain why Q_select has been dead across the entire M-series even at N≥3. Flagged for investigation before Ne_freezePlace.
+4. **The horizon plot confirms Q_place carries the WR lift.** Q_place Outcome=−1 bands at steps=0/1 near −1 and Outcome=+1 bands near +1 — the cleanest horizon separation in the M-series. Q_select shows only Outcome=−1 samples (no Outcome=+1 column), confirming the schema labeling concern.
+5. **Grad norm:** stays below clip throughout. The endgame anchor slightly reduces the high-N instability seen in MA.
+
+**Conclusion:**
+- ✓ Endgame anchoring works. FRACTION=0.5 is the sweet spot — 25% is too weak to prevent forgetting, 75% dilutes curriculum signal too much.
+- ✓ New champion: ME(2) at 73.4% last-100 / 96.7% peak vs bot_loss-BT, 85.8% last-100 vs random. **ME(2) becomes the new baseline for the Ne series.**
+- ✗ Q_select still dead. Win rate gain is entirely Q_place-driven.
+- 🔍 **Critical finding:** Q_select Outcome=+1 samples absent even at N=4 in the final epoch, suggesting a possible schema bug in how winner-side select transitions are labeled. Must be investigated before concluding that structural fixes (freeze, separate trunks) are needed.
+- **Checkpoint:** `CHECKPOINTS/ME_endgame(2)0429_ENDGAME_FRACTION_0.5/20260507_0829-ME_endgame(2)0429_ENDGAME_FRACTION_0.5_E_5000.pt`
 
 ---
 
-## Pending: MF_dataScale — Data Scaling at N=4 and N=6
+## MF_dataScale — Data Scaling at N=4 and N=6
 
 **Hypothesis:** Q_place's flat-band failure at N≥3 is variance-limited estimation: the MC return target `γ^k · outcome` has high variance with only 32 matches/epoch, and more data per epoch narrows the gradient noise enough for the model to find the outcome-conditional bands.
 
@@ -724,9 +749,32 @@ Removing the Q_place bootstrap **hurts at N=4 / N=6** and ties everywhere else.
 
 **Compare to:** MB_final(3) (N=4, 32 matches, 56.2% WR) and MB_final(4) (N=6, 32 matches, 43.8% WR).
 
+**Result:**
+
+| Run | N | MATCHES | last-100 WR vs BT | last-100 WR vs rand | MB equivalent |
+|-----|---|---|---|---|---|
+| MF(1) | 4 | 128 (×4) | 64.8% | 80.1% | MB(3): 56.2% |
+| **MF(2)** | **4** | **320 (×10)** | **65.5%** | **82.0%** | MB(3): 56.2% |
+| MF(3) | 6 | 128 (×4) | 45.1% | 65.9% | MB(4): 43.8% |
+| MF(4) | 6 | 320 (×10) | 47.7% | 68.1% | MB(4): 43.8% |
+
+**Key diagnostic findings:**
+
+1. **N=4 — variance hypothesis partially confirmed.** MF(1) and MF(2) both gain ~8–9pp vs MB(3), with faster convergence (~500 epochs vs ~2000 for the 32-match baseline). More data narrows the MC gradient noise enough to accelerate learning at N=4. MF(2) (320 matches, 1500 epochs) converges best and earliest.
+2. **N=4 qv_horizon: Q_place bands narrow but do not diverge by outcome.** Both Outcome=−1 and Outcome=+1 bands are near 0, stable, and overlapping. The WR gain at N=4 is driven by reduced variance in the Q_place training signal (cleaner gradients per epoch), not by the model actually learning to separate winning from losing states. The network exploits local patterns better but does not develop temporal value understanding.
+3. **N=6 — variance scaling does not help.** MF(3) and MF(4) gain only 1–4pp over MB(4), well within noise. The N-cliff is structural at N=6: more data per epoch cannot overcome the credit-assignment problem at this horizon depth.
+4. **Q_select: flat in all four panels, all N values.** Confirmed: data scaling does not revive the select head.
+5. **Ceiling: MF(2) at 65.5% trails ME(2) at 73.4%** — endgame anchoring with the curriculum (ME) outperforms pure data scaling at fixed N. The endgame buffer approach is the more efficient intervention.
+
+**Conclusion:**
+- ✓ Variance-limited estimation at N=4 is real — 10× data gives a meaningful convergence speedup and ~9pp WR lift.
+- ✗ Not the root cause: Q_place bands remain horizon-flat even with 320 matches; the model learns faster but does not learn temporal values.
+- ✗ N=6 cliff is structural: more data buys nothing at this horizon.
+- ✗ Q_select unaffected by data scaling: target-quality problem, not a noise/sample problem.
+
 ---
 
-## Pending: NA_dropout — Low Dropout Diagnostic
+## NA_dropout — Low Dropout Diagnostic
 
 **Hypothesis:** `dropout=0.5` in the shared trunk suppresses the select-head learning signal by zeroing half the trunk activations on every forward pass. With ~76K total params and a 1300-sample buffer, this is plausibly too high and may be throwing away most of the Q_select credit-assignment signal per update. Reducing to `dropout=0.1` costs almost nothing and could explain why Q_select stayed flat even in MB.
 
@@ -742,11 +790,34 @@ Removing the Q_place bootstrap **hurts at N=4 / N=6** and ties everywhere else.
 
 **Fixed:** `TRANSITION_SCHEMA="decoupled_autoreg"`, `DECOUPLED_TARGET_STYLE="td_place_mc_select"`, `REWARD_FUNCTION="final"`, `STARTING_NET=None`, `LR=7e-4`, `TAU=0.01`, `MATCHES_PER_EPOCH=32`.
 
-**Compare to:** MB_final(1) (N=2, 66.9% WR), MB_final(2) (N=3, 45.8% WR), MB_final(3) (N=4, 56.2% WR). The qv panel at N=2 is the primary diagnostic: if Q_select shows any outcome separation under low dropout, the high-dropout hypothesis is confirmed for the N=2 regime.
+**Compare to:** MB_final(1) (N=2, 66.9% WR), MB_final(2) (N=3, 45.8% WR), MB_final(3) (N=4, 56.2% WR).
+
+**Result:**
+
+| Run | N | last-100 WR vs BT | last-100 WR vs rand | MB equivalent |
+|-----|---|---|---|---|
+| NA(1) | 2 | 65.0% | 80.7% | MB(1): 66.9% |
+| NA(2) | 3 | 40.3% | 59.8% | MB(2): 45.8% |
+| NA(3) | 4 | 40.3% | 62.0% | MB(3): 56.2% |
+
+**Key diagnostic findings (grad norm):**
+
+1. **NA N=2 (blue): clearly below clip**, steady at ~0.65. Lower than MA reference (orange dashed, ~1.2–1.6).
+2. **NA N=3 (green): frequently at or above the clip threshold (1.0).** Smoothed line hovers between 0.9 and 1.05, with frequent spikes above clip. *Correction from earlier analysis: N=3 does clip regularly — this was previously misread as "below clip" by comparing against the MA reference. Absolute behavior: N=3 is at the boundary throughout training.*
+3. **NA N=4 (red): ~0.8**, below clip. Intermediate between N=2 and N=3.
+4. **Dropout=0.1 meaningfully lowers gradient magnitude at N=2 and N=4 vs MA reference (which regularly hit 1.3–1.6).** The gradient pathology at N=3 persists even with low dropout.
+5. **Q_select: flat in all panels.** Reducing dropout did not revive the select head.
+6. **WR: ties or trails MB at every N.** NA(1) at N=2 matches MB(1) within noise (65.0% vs 66.9%); NA(2–3) at N≥3 collapse to 40.3% — below MB(2)'s 45.8%.
+
+**Conclusion:**
+- ✗ Dropout was not the Q_select bottleneck. Even with 0.1 dropout the select head is flat.
+- ✗ N≥3 performance degrades vs MB — low dropout does not improve generalisation at larger horizons.
+- ✓ The gradient evidence is clean: dropout reduction does stabilise N=2 and N=4 training, but has no effect on the select head and actively hurts WR at N=3.
+- **Dropout=0.5 is the correct setting** for this model and regime. The original MB configuration is not contaminated by a dropout pathology.
 
 ---
 
-## Pending: NB_asymLR — Asymmetric Learning Rate for Select Head
+## NB_asymLR — Asymmetric Learning Rate for Select Head
 
 **Hypothesis:** Q_select's gradient signal reaching `fc2_select` is ~280× weaker than Q_place's gradient reaching `fc2_place` (observed ratio in prior Nexus diagnostic). Even if the gradient is non-zero, the AdamW update step for `fc2_select` is vanishingly small relative to the simultaneous `fc2_place` update. Giving `fc2_select` a 10× higher learning rate directly compensates for this imbalance without any architectural change.
 
@@ -762,4 +833,95 @@ Removing the Q_place bootstrap **hurts at N=4 / N=6** and ties everywhere else.
 
 **Fixed:** `ARCHITECTURE=QuartoCNNAutoreg`, `TRANSITION_SCHEMA="decoupled_autoreg"`, `DECOUPLED_TARGET_STYLE="td_place_mc_select"`, `REWARD_FUNCTION="final"`, `STARTING_NET=None`, `TAU=0.01`, `MATCHES_PER_EPOCH=32`.
 
-**Compare to:** MB_final (same N values). If Q_select shows outcome separation in the N=2 qv panel → gradient starvation at the output layer was the dominant cause. If Q_select stays flat even at 10× LR → the starvation is deeper in the trunk, and the next hypothesis is separate trunks for place and select.
+**Compare to:** MB_final (same N values).
+
+**Result:**
+
+| Run | N | last-100 WR vs BT | last-100 WR vs rand | MB equivalent |
+|-----|---|---|---|---|
+| NB(1) | 2 | 66.5% | 81.5% | MB(1): 66.9% |
+| NB(2) | 3 | 39.0% | 58.9% | MB(2): 45.8% |
+| NB(3) | 4 | 53.0% | 72.9% | MB(3): 56.2% |
+
+**Key diagnostic findings (grad norm):**
+
+1. **NB N=2 (blue): below clip**, ~0.75 throughout. Asymmetric LR has no visible effect on total gradient at N=2 — Q_select has no Outcome=+1 samples at N=2 (starvation), so the 10× select LR fires on one outcome class only and adds no useful signal.
+2. **NB N=3 (green): always above 1.0**, sustained at ~1.1–1.2 throughout training. The inflated select LR destabilises the trunk at N=3 where Q_select finally has mixed-outcome samples. Constant clipping confirmed.
+3. **NB N=4 (red): above 1.0 in early training (~epochs 0–700)**, then settles to ~0.8 as the cosine schedule reduces effective LR. Early instability attributable to 10× select LR before the model has a settled trunk representation.
+4. **Q_select: flat in all panels, all N values.** The 10× LR did not produce any Outcome=+1 signal in the Q_select qv panels.
+5. **WR at N=3: below MB(2)** (39.0% vs 45.8%). The trunk destabilisation at N=3 directly costs ~7pp WR. At N=4, NB(3) nearly matches MB(3) (53.0% vs 56.2%) once the LR schedule settles.
+
+**Conclusion:**
+- ✗ Asymmetric LR does not revive Q_select. The select head receives stronger gradient updates but still produces no outcome-conditional signal. This rules out insufficient gradient magnitude as the cause of select-head failure.
+- ✗ 10× select LR actively hurts performance at N=3 by destabilising the trunk.
+- ✓ N=2 behaviour unchanged — confirms the starvation diagnosis at N=2 (no positive-outcome select targets, so extra LR does nothing).
+- **Implication:** the Q_select failure is a target-quality problem, not a gradient-magnitude problem. Addressing it requires either fixing the sample labeling (schema bug investigation) or providing a supervised anchor signal (auxiliary loss).
+
+---
+
+## Experiment Naming Update — N-series
+
+Code version **N** = architecture/hyperparameter changes on top of the established ME(2) base. Experiments starting from `NA_dropout` use the same `QuartoCNNAutoreg` + `decoupled_autoreg` + `final` reward stack as the M-series but sweep architectural or training-loop hyperparameters. Next code-change experiments continue the N-series.
+
+**Baseline change from Ne onward:** `bot_loss-BT` replaced by `ME_endgame(2)_E_5000` as the "current best" reference. `bot_random` retained. Rationale: ME(2) is now the champion and represents a meaningful performance bar; loss-BT is a weaker coupled-architecture bot that no longer adds signal. *Historical comparisons through loss-BT remain valid for A–N series; the break is noted here.*
+
+---
+
+## Key Takeaways (updated May 2026)
+
+1. **End-game training works well** (Aa_replay): N=2, buffer=8 → 65% WR, loss 0.06.
+2. **Full-game from scratch fails** (Ab_data): N≥8 → loss stuck at 0.43+, no learning.
+3. **Fine-tuning with curriculum fails** (Ac_fine, Ac_fineShallow): catastrophic forgetting.
+4. **Adversarial sign flip is wrong with propagated rewards** (FA_Bellman): double-negation diverges Q.
+5. **Q_select saturation persists across architectures A–K** in the joint schema: target design, not architecture, is the bottleneck.
+6. **Decoupled-autoreg schema (M-series)** softens the N-cliff and achieves the best N=2 result under `final` reward (MB: 66.9% WR).
+7. **MC bootstrap removal (MC_MCboth)** does not fix Q_place flat-band at N≥3.
+8. **Unbounded activations (MD_unbound)** do not revive Q_select; tanh saturation is not the select bottleneck.
+9. **Endgame anchoring (ME_endgame(2))** is the first genuine WR improvement: 73.4% last-100 vs bot_loss-BT, +6.5pp over MB(1). **New champion.**
+10. **Data scaling (MF_dataScale)**: variance-limited at N=4 is real but not the root cause; Q_place learns faster but not temporally; N=6 cliff is structural.
+11. **Dropout reduction (NA_dropout)**: not the Q_select bottleneck; dropout=0.5 is correct.
+12. **Asymmetric LR (NB_asymLR)**: insufficient gradient magnitude is ruled out as the Q_select failure cause; 10× select LR destabilises training at N≥3.
+13. **Critical open question (flagged May 2026):** Q_select Outcome=+1 samples appear absent even at N=4 in the ME run (qv_progress Outcome=+1 panel nearly empty throughout). If confirmed as a schema labeling bug, it would fully explain why Q_select has been dead across the entire M-series regardless of intervention.
+
+---
+
+## Current Open Problem: Q_select Dead Signal + Schema Bug Hypothesis
+
+**Symptom:** Q_select is flat (near −0.5 to −1) in every M/N-series experiment across all N values, including N=3 and N=4 where the decoupled-autoreg schema is expected to supply both Outcome=−1 and Outcome=+1 select transitions.
+
+**Standing interventions tried and ruled out:**
+| Intervention | Experiment | Result |
+|---|---|---|
+| MC target for Q_select | MA–MB, LA–LB | Still flat |
+| Remove tanh | MD_unbound | Still flat |
+| Reduce dropout | NA_dropout | Still flat |
+| Asymmetric 10× LR | NB_asymLR | Still flat |
+| More data (×10) | MF_dataScale | Still flat |
+
+**New hypothesis (May 2026):** The experience tuple may be mislabeling winner-side select transitions. Under the decoupled-autoreg schema at N≥3, the winner's select actions should receive `outcome=+1`. If they receive `outcome=0` or `outcome=−1` instead, Q_select would train exclusively on negative-outcome samples regardless of N — reproducing exactly the observed flat/negative saturation. This would make all five interventions above irrelevant (they all assumed the signal existed but was too weak).
+
+**Verification required before Ne_freezePlace:** inspect `gen_experience` with `TRANSITION_SCHEMA="decoupled_autoreg"` and print the `outcome` distribution of select-only transitions at N=3. If `outcome=+1` is absent or misassigned, fix it before running the freeze experiment.
+
+**Remaining structural fixes (still untested):**
+| Fix | Description | Status |
+|---|---|---|
+| **Ne_freezePlace** | Load ME(2), fix N=3, freeze Q_place, train Q_select alone at 5–10× LR. Clean test of gradient-starvation hypothesis. Only run after schema bug verified/fixed. | Next |
+| **Nf_auxSelect** | Supervised 1-step lookahead auxiliary loss: label each select action with "does giving this piece let opponent win immediately?" — no bootstrap, no MC variance. | After Ne |
+| **Ng_sepTrunks** | Separate trunk for place and select (no shared representation). Tests shared-trunk interference hypothesis. | After Ne |
+
+---
+
+## Ne_freezePlace — Freeze Q_place, Train Q_select Alone (PLANNED)
+
+**Pre-condition:** Verify and if necessary fix the schema labeling bug (Outcome=+1 absent for winner-side selects at N≥3). This must be confirmed before running.
+
+**Hypothesis:** Q_select receives vanishingly small gradients relative to Q_place because both heads share the trunk and Q_place dominates the loss. Freezing Q_place removes the dominant gradient source; Q_select then drives all trunk updates at N=3 where it finally has both outcome classes.
+
+**Design:**
+- `STARTING_NET = ME(2) E_5000` checkpoint
+- `N_LAST_STATES_INIT = N_LAST_STATES_FINAL = 3` (fixed, no curriculum — N=3 is the minimum for Outcome=+1 select samples)
+- Freeze `fc2_place` parameters only; trunk and `fc2_select` train freely
+- `LR_SELECT = 5e-3` (5–10× base LR) on `fc2_select`; trunk at `LR = 7e-4`
+- `EPOCHS = 2000`
+- **Primary diagnostic:** Q_select Outcome=+1 panel in qv_progress. If it shows any band separation after 500 epochs → gradient starvation was the dominant cause. If it stays flat → the problem is schema labeling or trunk representation.
+- **Compare to:** MB(2) at N=3 (45.8% WR) — the known flat-Q_select N=3 baseline.
