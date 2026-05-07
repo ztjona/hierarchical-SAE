@@ -181,3 +181,21 @@ class QuartoCNNAutoregUnbound(_QuartoCNNAutoregBase):
 
     def _apply_output_activation(self, logits: torch.Tensor) -> torch.Tensor:
         return logits
+
+
+class QuartoCNNAutoregLowDropout(_QuartoCNNAutoregBase):
+    """Same as QuartoCNNAutoreg but with dropout=0.1 instead of 0.5.
+
+    Diagnostic: tests whether dropout=0.5 suppresses the select-head signal.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.dropout = nn.Dropout(0.1)  # override the 0.5 default
+
+    @property
+    def name(self) -> str:
+        return "QuartoCNN_autoreg_low_dropout"
+
+    def _apply_output_activation(self, logits: torch.Tensor) -> torch.Tensor:
+        return torch.tanh(logits)
