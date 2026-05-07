@@ -141,7 +141,7 @@ class Quarto_bot(BotAI):
                 try:
                     logger.debug(f"Loading model from {model_path}")
                     self.model = QuartoCNN.from_file(model_path)
-                    logger.info(f"✅ Model loaded successfully from {model_path}")
+                    # logger.info(f"✅ Model loaded successfully from {model_path}")
                 except FileNotFoundError as e:
                     error_msg = (
                         f"❌ MODEL FILE NOT FOUND: {model_path}\n\n"
