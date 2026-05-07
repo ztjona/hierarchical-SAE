@@ -646,29 +646,120 @@ Removing the Q_place bootstrap **hurts at N=4 / N=6** and ties everywhere else.
 
 ---
 
-## Pending: MD_unbound — Unbounded Decoupled-Autoreg Heads
+## MD_unbound — Unbounded Decoupled-Autoreg Heads (N_LAST_STATES sweep)
 
-**Hypothesis:** Q_place's flat-band failure at N≥3 (surviving both reward-design and target-design fixes) is caused by `tanh` saturation collapsing the select-head trunk gradient (~280× ratio per the prior Nexus diagnostic on a joint checkpoint). Removing `tanh` from both heads should let select-side gradient reach the trunk and let Q_place fit horizon-conditional MC bootstrap targets at N≥3. Forks from MB (the better-performing target style at the informative middle-N buckets), not MC.
+**Question:** Does removing `tanh` from both heads allow the select-trunk gradient to reach the shared trunk, unlocking outcome separation at N≥3?
 
-**Code change vs MB:** only the architecture switches from `QuartoCNNAutoreg` to `QuartoCNNAutoregUnbound` (already exists in `models/CNN_autoreg.py`). Output activation goes from `tanh` to identity; everything else identical.
+**Code change vs MB:** `ARCHITECTURE=QuartoCNNAutoregUnbound` (identity output, no tanh). Everything else identical to MB.
 
-**Sweep:** `N_LAST_STATES_INIT` ∈ {2, 3, 4, 6, 12, 16}.
+| Run | N_LAST_STATES_INIT | Epochs |
+|-----|---------------------|--------|
+| MD_unbound(1) | 2 | 5000 |
+| MD_unbound(2) | 3 | 4000 |
+| MD_unbound(3) | 4 | 4000 |
+| MD_unbound(4) | 6 | 3000 |
+| MD_unbound(5) | 12 | 2000 |
+| MD_unbound(6) | 16 | 1000 |
 
-**Fixed:** Identical to MB except `ARCHITECTURE=QuartoCNNAutoregUnbound`. `DECOUPLED_TARGET_STYLE="td_place_mc_select"`, `REWARD_FUNCTION="final"`, `LOSS_APPROACH="mc_select"`.
+**Fixed:** `TRANSITION_SCHEMA="decoupled_autoreg"`, `DECOUPLED_TARGET_STYLE="td_place_mc_select"`, `REWARD_FUNCTION="final"`, `LR=7e-4`, `TAU=0.01`, `GAMMA=0.99`.
 
-**Risk note:** `IA_unbound` (joint, propagate, separate_bellman) diverged. The mitigations here vs IA: `final` instead of `propagate` (smaller place targets), MC on Q_select (no Bellman self-bootstrap → Q_select target is bounded by data, ∈[−1, 1]). Q_place still bootstraps through `max_a' Q_select`, which is bounded *only if* Q_select learns its bounded target — if Q_select grows under unbounded heads, Q_place can blow up too. Watch N=2 first; if it diverges, pivot to `mc_both + unbounded` (`ME_*`) to remove all bootstrap chains.
+**Result vs MB head-to-head:**
 
-**Diagnostic addition:** per-head trunk gradient norm logged once per epoch — `grad_norm_place_trunk` and `grad_norm_select_trunk`. The ratio is the load-bearing measurement: the saturation hypothesis predicts the ratio rises substantially toward 1.0 when tanh is removed. If the ratio stays small even without tanh, saturation is not the dominant cause and we have to look elsewhere (e.g. data distribution, capacity, or shared-trunk interference under the autoreg topology).
+| N | MB WR vs BT | MD WR vs BT | Δ |
+|---|---|---|---|
+| 2 | 66.9% | 61.6% / 78.6% | **−5.3pp** |
+| 3 | 45.8% | ~tied | ~0 |
+| 4 | 56.2% | ~tied | ~0 |
+| 6–16 | 43.8%–32.3% | ~tied | ~0 |
 
-**Decision gate:**
-- **If N=2 holds at MB(1)'s 66.9% / 80.5% AND N=4 Q_place qv panel shows visible outcome separation AND grad_norm ratio rises into [0.1, 1.0]** → saturation was the bottleneck. Characterize the new N tolerance.
-- **If training diverges at N=2** → unbounded heads are too unstable in this setup; pivot to `ME_*` (mc_both + unbounded).
-- **If training is stable but Q_place still flat at N≥3 AND grad ratio stays small** → saturation is not the bottleneck either. The remaining candidates are data-distribution (deeper-horizon transitions are systematically biased) or shared-trunk interference under the phase-embedding topology.
+**Key diagnostic findings:**
+1. **No divergence** — stability criterion passed.
+2. **N=2 regressed ~5pp** — unbounded heads cost performance at the known-good regime.
+3. **N=4 Q_place qv shows weak outcome separation** (bands ~+0.1 vs ~−0.1) — only N where unbounding had a visible positive effect on Q_place.
+4. **Q_select flat in every N panel** — unbounding did not revive the select head. The tanh-saturation hypothesis for Q_select is falsified.
+5. **Per-head trunk grad-norm split was not captured** — the comparison plot logged total norm only; the load-bearing measurement was incomplete.
+
+**Conclusion:**
+- ✗ Decision gate failed on WR: N=2 lost ~5pp; no N improved.
+- ✗ Q_select stays flat even unbounded: tanh saturation is not the Q_select bottleneck.
+- ✓ Stability holds under `final` reward (unlike `IA_unbound` with `propagate`).
+- **Next moves (0429 sweep):** `ME_endgame`, `MF_dataScale`, `NA_dropout`, `NB_asymLR`.
 
 ---
 
-## Pending: Ad_endgame
+## Pending: ME_endgame — Endgame Anchor Buffer (ENDGAME_FRACTION sweep)
 
-**Hypothesis:** Maintaining a separate endgame replay buffer (N=2 experience) alongside the curriculum buffer will prevent catastrophic forgetting.
+**Hypothesis:** Maintaining a separate endgame replay buffer (N=2 experience) alongside a curriculum buffer expanding from N=2 to N=4 prevents catastrophic forgetting of the terminal-state Q_place anchor while simultaneously exposing the model to mid-game states.
 
-**Sweep:** `ENDGAME_FRACTION` ∈ {0.25, 0.5, 0.75} — fraction of each training batch drawn from the endgame buffer.
+**Renamed from "Ad_endgame"** — the pending section was registered pre-M-series. Since this runs on the decoupled-autoreg code (M), the correct series letter is **ME** (next after MD_unbound).
+
+**Sweep:** `ENDGAME_FRACTION` ∈ {0.25, 0.5, 0.75} — fraction of each training batch drawn from the N=2 endgame buffer. Remaining batch fraction comes from the curriculum buffer (N=2→4, linearly).
+
+| Run | ENDGAME_FRACTION | N_LAST_STATES_INIT | N_LAST_STATES_FINAL | Epochs |
+|-----|---|----|-----|--------|
+| ME_endgame(1) | 0.25 | 2 | 4 | 5000 |
+| ME_endgame(2) | 0.50 | 2 | 4 | 5000 |
+| ME_endgame(3) | 0.75 | 2 | 4 | 5000 |
+
+**Fixed:** `ARCHITECTURE=QuartoCNNAutoreg`, `TRANSITION_SCHEMA="decoupled_autoreg"`, `DECOUPLED_TARGET_STYLE="td_place_mc_select"`, `REWARD_FUNCTION="final"`, `STARTING_NET=None`, `LR=7e-4`, `TAU=0.01`, `EPOCHS=5000`, `MATCHES_PER_EPOCH=32`.
+
+**Compare to:** MB_final(3) (N=4, no endgame anchor, 56.2% WR vs bot_loss-BT). If endgame anchoring works, the N=4 run here should stay closer to MB(1)'s 66.9%.
+
+---
+
+## Pending: MF_dataScale — Data Scaling at N=4 and N=6
+
+**Hypothesis:** Q_place's flat-band failure at N≥3 is variance-limited estimation: the MC return target `γ^k · outcome` has high variance with only 32 matches/epoch, and more data per epoch narrows the gradient noise enough for the model to find the outcome-conditional bands.
+
+**Code change vs MB:** only `MATCHES_PER_EPOCH` changes (×4 = 128, ×10 = 320). Epochs reduced proportionally to fit a 3-day run window.
+
+| Run | N | MATCHES_PER_EPOCH | Epochs |
+|-----|---|---|--------|
+| MF_dataScale(1) | 4 | 128 (×4) | 3000 |
+| MF_dataScale(2) | 4 | 320 (×10) | 1500 |
+| MF_dataScale(3) | 6 | 128 (×4) | 2000 |
+| MF_dataScale(4) | 6 | 320 (×10) | 1000 |
+
+**Fixed:** Identical to corresponding MB runs except `MATCHES_PER_EPOCH`. `ARCHITECTURE=QuartoCNNAutoreg`, `REWARD_FUNCTION="final"`, `LR=7e-4`, `TAU=0.01`, `ENDGAME_FRACTION=0`.
+
+**Compare to:** MB_final(3) (N=4, 32 matches, 56.2% WR) and MB_final(4) (N=6, 32 matches, 43.8% WR).
+
+---
+
+## Pending: NA_dropout — Low Dropout Diagnostic
+
+**Hypothesis:** `dropout=0.5` in the shared trunk suppresses the select-head learning signal by zeroing half the trunk activations on every forward pass. With ~76K total params and a 1300-sample buffer, this is plausibly too high and may be throwing away most of the Q_select credit-assignment signal per update. Reducing to `dropout=0.1` costs almost nothing and could explain why Q_select stayed flat even in MB.
+
+**Code change from M:** New `QuartoCNNAutoregLowDropout` class in `models/CNN_autoreg.py` — identical to `QuartoCNNAutoreg` but `self.dropout = nn.Dropout(0.1)`. Output activation remains `tanh`.
+
+**Sweep:** `N_LAST_STATES_INIT` ∈ {2, 3, 4} — same range as the informative MB N-values.
+
+| Run | N_LAST_STATES_INIT | Epochs |
+|-----|---------------------|--------|
+| NA_dropout(1) | 2 | 5000 |
+| NA_dropout(2) | 3 | 5000 |
+| NA_dropout(3) | 4 | 5000 |
+
+**Fixed:** `TRANSITION_SCHEMA="decoupled_autoreg"`, `DECOUPLED_TARGET_STYLE="td_place_mc_select"`, `REWARD_FUNCTION="final"`, `STARTING_NET=None`, `LR=7e-4`, `TAU=0.01`, `MATCHES_PER_EPOCH=32`.
+
+**Compare to:** MB_final(1) (N=2, 66.9% WR), MB_final(2) (N=3, 45.8% WR), MB_final(3) (N=4, 56.2% WR). The qv panel at N=2 is the primary diagnostic: if Q_select shows any outcome separation under low dropout, the high-dropout hypothesis is confirmed for the N=2 regime.
+
+---
+
+## Pending: NB_asymLR — Asymmetric Learning Rate for Select Head
+
+**Hypothesis:** Q_select's gradient signal reaching `fc2_select` is ~280× weaker than Q_place's gradient reaching `fc2_place` (observed ratio in prior Nexus diagnostic). Even if the gradient is non-zero, the AdamW update step for `fc2_select` is vanishingly small relative to the simultaneous `fc2_place` update. Giving `fc2_select` a 10× higher learning rate directly compensates for this imbalance without any architectural change.
+
+**Code change from M:** Modified optimizer in the training script: AdamW with two parameter groups. `fc2_select` parameters use `LR_SELECT=7e-3`; all other parameters (trunk, `fc_in_aux`, `conv1`, `conv2`, `fc1`, `fc2_place`, phase embedding) use `LR=7e-4`. No LR schedule (constant rates throughout).
+
+**Sweep:** `N_LAST_STATES_INIT` ∈ {2, 3, 4}.
+
+| Run | N_LAST_STATES_INIT | LR (base) | LR_SELECT | Epochs |
+|-----|---------------------|-----------|-----------|--------|
+| NB_asymLR(1) | 2 | 7e-4 | 7e-3 | 5000 |
+| NB_asymLR(2) | 3 | 7e-4 | 7e-3 | 5000 |
+| NB_asymLR(3) | 4 | 7e-4 | 7e-3 | 5000 |
+
+**Fixed:** `ARCHITECTURE=QuartoCNNAutoreg`, `TRANSITION_SCHEMA="decoupled_autoreg"`, `DECOUPLED_TARGET_STYLE="td_place_mc_select"`, `REWARD_FUNCTION="final"`, `STARTING_NET=None`, `TAU=0.01`, `MATCHES_PER_EPOCH=32`.
+
+**Compare to:** MB_final (same N values). If Q_select shows outcome separation in the N=2 qv panel → gradient starvation at the output layer was the dominant cause. If Q_select stays flat even at 10× LR → the starvation is deeper in the trunk, and the next hypothesis is separate trunks for place and select.
