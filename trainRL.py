@@ -452,18 +452,18 @@ for e in tqdm(
         q_values_history["rewards"].append(
             reward.detach().cpu().tolist() if hasattr(reward, "detach") else reward
         )
-    if len(q_values_history["outcome"]) == 0:
-        outcome = exp["outcome"]
-        q_values_history["outcome"].append(
-            outcome.detach().cpu().tolist() if hasattr(outcome, "detach") else outcome
-        )
-    if len(q_values_history["steps_to_terminal"]) == 0:
-        steps_to_terminal = exp["steps_to_terminal"]
-        q_values_history["steps_to_terminal"].append(
-            steps_to_terminal.detach().cpu().tolist()
-            if hasattr(steps_to_terminal, "detach")
-            else steps_to_terminal
-        )
+    # Store outcome and steps_to_terminal every epoch — exp regenerates each epoch so
+    # epoch-0 labels would be stale for offline replot tools (view_qv.py etc.).
+    outcome = exp["outcome"]
+    q_values_history["outcome"].append(
+        outcome.detach().cpu().tolist() if hasattr(outcome, "detach") else outcome
+    )
+    steps_to_terminal = exp["steps_to_terminal"]
+    q_values_history["steps_to_terminal"].append(
+        steps_to_terminal.detach().cpu().tolist()
+        if hasattr(steps_to_terminal, "detach")
+        else steps_to_terminal
+    )
 
     loss_data["epoch_values"].append(step_i)
     grad_norm_data["epoch_values"].append(step_i)

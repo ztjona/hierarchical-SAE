@@ -719,15 +719,16 @@ ME(2) is the **new WR champion** — first genuine improvement over MB(1) since 
 
 1. **Q_place at N=2 (endgame buffer): clearly bimodal throughout.** Outcome=−1 band stays near −1; Outcome=+1 band stays near +1. The endgame anchor successfully maintains the terminal-state value anchor that catastrophic forgetting destroyed in Ac_fineShallow.
 2. **Q_place in the curriculum (N=2→4): transitions but does not fully separate.** Beyond epoch ~1300 when N begins to grow, Q_place loses the tight bimodal structure. Still better than MB at the same N.
-3. **Q_select: Outcome=+1 panel shows "No valid samples" even at final epoch (N=4).** This is unexpected — at N≥3 the decoupled-autoreg schema should include winner-side select transitions with Outcome=+1. The qv_progress Outcome=+1 panel for Q_select is nearly empty for the entire run, including the N=3/4 phase (epochs 2500–5000). **Possible schema bug: winner-side select transitions may not be labeled Outcome=+1 in the experience tuple.** This would explain why Q_select has been dead across the entire M-series even at N≥3. Flagged for investigation before Ne_freezePlace.
-4. **The horizon plot confirms Q_place carries the WR lift.** Q_place Outcome=−1 bands at steps=0/1 near −1 and Outcome=+1 bands near +1 — the cleanest horizon separation in the M-series. Q_select shows only Outcome=−1 samples (no Outcome=+1 column), confirming the schema labeling concern.
+3. **Q_select: both Outcome=−1 and Outcome=+1 panels show data, but Q_select never separates by outcome.** Both classes cluster in [−0.75, −0.55] (dark on the colormap), making them visually indistinguishable. The "No valid samples" text in the figure appears only for the Outcome=0 column (draws), which is expected — no draws occur vs a random bot. Schema confirmed correct: empirical check at N=3 gives 200/400 winner-select transitions; at N=4, 200/600. The head is learning a weak signal (Δ≈0.18 between classes) but converges to a negative attractor rather than the expected ±1 bimodal distribution.
+4. **The horizon plot confirms Q_place carries the WR lift.** Q_place Outcome=−1 bands at steps=0/1 near −1 and Outcome=+1 bands near +1 — the cleanest horizon separation in the M-series. Q_select Outcome=+1 column renders but both win/lose bands sit between −0.75 and −0.55, with no outcome-conditional structure.
 5. **Grad norm:** stays below clip throughout. The endgame anchor slightly reduces the high-N instability seen in MA.
 
 **Conclusion:**
 - ✓ Endgame anchoring works. FRACTION=0.5 is the sweet spot — 25% is too weak to prevent forgetting, 75% dilutes curriculum signal too much.
 - ✓ New champion: ME(2) at 73.4% last-100 / 96.7% peak vs bot_loss-BT, 85.8% last-100 vs random. **ME(2) becomes the new baseline for the Ne series.**
-- ✗ Q_select still dead. Win rate gain is entirely Q_place-driven.
-- 🔍 **Critical finding:** Q_select Outcome=+1 samples absent even at N=4 in the final epoch, suggesting a possible schema bug in how winner-side select transitions are labeled. Must be investigated before concluding that structural fixes (freeze, separate trunks) are needed.
+- ✗ Q_select still weak. Win rate gain is entirely Q_place-driven.
+- 🔎 **Root cause of Q_select weakness: target class imbalance.** "No valid samples" in the figures is for Outcome=0 (draws) only — expected. Q_select+Outcome=+1 DOES render data but both outcome classes cluster in [−0.75, −0.55], visually dark and indistinguishable. Direct Q-value measurement on ME(2) at E_5000: `sel_neg mean=−0.74`, `sel_pos mean=−0.56` (Δ≈+0.18 — weak but nonzero; Q_place: place_neg mean=−0.25 vs place_pos mean=+0.33). Cause: (i) the entire N=2 curriculum phase (~2500 epochs) and permanent endgame buffer supply only loser-select transitions; (ii) at N=4, 2 loser selects per 1 winner select per match; (iii) winner selects are further from terminal (steps=3 vs 1) → MC target γ³≈0.97 vs −γ¹≈−0.99, weaker signal per sample.
+- 📊 **Known `plot_Qv_progress` limitation:** the function clips all epochs to `min_size_across_epochs` (epoch-0 batch size ≈ 96 at N=2). In later epochs with N=4 (224 samples), only the first 96 positions are tracked. Moreover, position index i refers to a different physical sample in each epoch (exp is regenerated each epoch), so individual trajectories are not meaningful — only the per-group mean is informative. This limitation does not affect training correctness.
 - **Checkpoint:** `CHECKPOINTS/ME_endgame(2)0429_ENDGAME_FRACTION_0.5/20260507_0829-ME_endgame(2)0429_ENDGAME_FRACTION_0.5_E_5000.pt`
 
 ---
@@ -881,7 +882,8 @@ Code version **N** = architecture/hyperparameter changes on top of the establish
 10. **Data scaling (MF_dataScale)**: variance-limited at N=4 is real but not the root cause; Q_place learns faster but not temporally; N=6 cliff is structural.
 11. **Dropout reduction (NA_dropout)**: not the Q_select bottleneck; dropout=0.5 is correct.
 12. **Asymmetric LR (NB_asymLR)**: insufficient gradient magnitude is ruled out as the Q_select failure cause; 10× select LR destabilises training at N≥3.
-13. **Critical open question (flagged May 2026):** Q_select Outcome=+1 samples appear absent even at N=4 in the ME run (qv_progress Outcome=+1 panel nearly empty throughout). If confirmed as a schema labeling bug, it would fully explain why Q_select has been dead across the entire M-series regardless of intervention.
+13. **Root cause of Q_select weakness confirmed (May 2026 diagnostic):** Schema is correct — winner-side selects are labeled Outcome=+1 at N≥3 (empirical: N=3 → 200 sel_pos / 400 select total; N=4 → 200/600). ME(2) checkpoint Q_select: sel_pos mean=−0.56 vs sel_neg mean=−0.74 (Δ≈0.18, weak nonzero). The "No valid samples" text in qv figures is for Outcome=0 (draws only); Q_select+Outcome=+1 renders data but looks dark because both classes are in [−0.75, −0.55]. Root cause: **permanent class imbalance** — endgame buffer supplies loser-selects at 50% of every batch throughout all 5000 epochs; at N=4, loser-select outnumber winner-select 2:1 per match. Side note: `plot_Qv_progress` clips to epoch-0 batch size and tracks position index i across epochs where each epoch has a different exp batch — individual trajectories are misleading; only the per-group mean is informative. Fix: track Q-values on a fixed held-out eval batch rather than the rotating training batch.
+14. **Pickle label artifact (fixed from Ne onward):** In experiments Aa through NB, `q_values_history["outcome"]` and `q_values_history["steps_to_terminal"]` in saved `.pkl` files contain only epoch-0 labels (guarded by `if len() == 0`). Since `exp` regenerates every epoch, these stored labels are stale for all subsequent epochs. Fixed in `trainRL.py` (May 2026): both fields now append every epoch, making offline replot tools (`view_qv.py` etc.) self-consistent.
 
 ---
 
@@ -898,30 +900,94 @@ Code version **N** = architecture/hyperparameter changes on top of the establish
 | Asymmetric 10× LR | NB_asymLR | Still flat |
 | More data (×10) | MF_dataScale | Still flat |
 
-**New hypothesis (May 2026):** The experience tuple may be mislabeling winner-side select transitions. Under the decoupled-autoreg schema at N≥3, the winner's select actions should receive `outcome=+1`. If they receive `outcome=0` or `outcome=−1` instead, Q_select would train exclusively on negative-outcome samples regardless of N — reproducing exactly the observed flat/negative saturation. This would make all five interventions above irrelevant (they all assumed the signal existed but was too weak).
+**Schema bug hypothesis refuted (May 2026 diagnostic).** `_actor_outcome(player_pos, match_result)` returns +1.0 when the acting player is the eventual winner and −1.0 otherwise. Empirical at N=3 (200 matches): `select_neg=200, select_zero=0, select_pos=200`. At N=4: `select_neg=400, select_pos=200`. At N=2: `select_neg=200, select_pos=0` — structurally zero winner-selects because the N=2 window contains {loser_place, loser_select, winner_terminal_place} only.
 
-**Verification required before Ne_freezePlace:** inspect `gen_experience` with `TRANSITION_SCHEMA="decoupled_autoreg"` and print the `outcome` distribution of select-only transitions at N=3. If `outcome=+1` is absent or misassigned, fix it before running the freeze experiment.
+**Plot artifact clarification.** The qv figures show "No valid samples" text only for Outcome=0 (draws), which have zero samples vs a random bot (essentially impossible to draw on a 2×2 board). Q_select+Outcome=+1 renders data but both outcome classes cluster in [−0.75, −0.55] on the summer colormap (dark). Additionally, `plot_Qv_progress` clips all epochs to `min_size_across_epochs` (epoch-0 batch size ≈ 96 at N=2); in later epochs with larger exp batches (N=4, ~224 rows), only the first 96 positions are tracked. Since each epoch generates a fresh exp batch, position index `i` represents different physical samples at different epochs — individual trajectories are not meaningful; only the per-group mean is. **This is a plotting limitation to fix in future**, not a training correctness issue.
+
+**Confirmed root cause: target class imbalance.** ME(2) at E_5000: sel_pos mean=−0.56 vs sel_neg mean=−0.74 (Δ≈0.18). Both classes firmly negative; converges to a "default −0.65" attractor. Causes in order of magnitude: (1) endgame buffer permanently supplies loser-select transitions (outcome=−1) to 50% of every training batch for all 5000 epochs; (2) during N=2 curriculum phase (epochs 0–~2500), zero winner-select transitions exist in the curriculum buffer either; (3) at N=4, loser-selects outnumber winner-selects 2:1 per match; (4) winner selects sit 2 steps further from terminal → MC target γ³≈0.97 vs γ¹≈0.99 (minor). The five interventions (MC target, dropout, asymmetric LR, unbounded activations, data scaling) all assumed the signal existed and was too weak — they addressed the wrong cause.
 
 **Remaining structural fixes (still untested):**
 | Fix | Description | Status |
 |---|---|---|
-| **Ne_freezePlace** | Load ME(2), fix N=3, freeze Q_place, train Q_select alone at 5–10× LR. Clean test of gradient-starvation hypothesis. Only run after schema bug verified/fixed. | Next |
-| **Nf_auxSelect** | Supervised 1-step lookahead auxiliary loss: label each select action with "does giving this piece let opponent win immediately?" — no bootstrap, no MC variance. | After Ne |
-| **Ng_sepTrunks** | Separate trunk for place and select (no shared representation). Tests shared-trunk interference hypothesis. | After Ne |
+| **Ne_freezePlace** | Load ME(2), fix N=3, freeze `fc2_place`, train `fc2_select` + trunk. Isolates gradient-starvation hypothesis. | Next |
+| **Nf_balanceSelect** | Separate winner-select replay buffer; mix with regular buffer at equal frequency. Direct attack on class-imbalance root cause. | After Ne |
+| **Ng_auxSelect** | Supervised 1-step lookahead auxiliary loss on Q_select. No bootstrap, no MC variance, no imbalance. | After Nf |
+| **Nh_sepTrunks** | Separate trunk for place and select. Tests shared-trunk interference independently. | After Ng |
 
 ---
 
 ## Ne_freezePlace — Freeze Q_place, Train Q_select Alone (PLANNED)
 
-**Pre-condition:** Verify and if necessary fix the schema labeling bug (Outcome=+1 absent for winner-side selects at N≥3). This must be confirmed before running.
+**Hypothesis:** Q_select gradient contribution is dwarfed by Q_place (N=3 has 2 place transitions per 1 select winner transition; the N=2 endgame buffer adds more place signal). Freezing Q_place removes the dominant gradient source and forces the trunk to adapt to select-only updates.
 
-**Hypothesis:** Q_select receives vanishingly small gradients relative to Q_place because both heads share the trunk and Q_place dominates the loss. Freezing Q_place removes the dominant gradient source; Q_select then drives all trunk updates at N=3 where it finally has both outcome classes.
+**Code changes relative to NB_asymLR pattern:**
+1. Load `STARTING_NET` from ME(2) E_5000 checkpoint.
+2. Freeze `fc2_place` parameters: `for p in policy_net.fc2_place.parameters(): p.requires_grad = False`
+3. Build optimizer with two parameter groups (pattern from `NB_asymLR` scripts):
+   ```python
+   select_param_ids = {id(p) for p in policy_net.fc2_select.parameters()}
+   trunk_params = [p for name, p in policy_net.named_parameters()
+                   if name not in ('fc2_place.weight', 'fc2_place.bias')]
+   optimizer = optim.AdamW([
+       {'params': [p for p in trunk_params if id(p) not in select_param_ids], 'lr': LR},
+       {'params': list(policy_net.fc2_select.parameters()), 'lr': LR_SELECT},
+   ], amsgrad=True)
+   ```
+4. `N_LAST_STATES_INIT = N_LAST_STATES_FINAL = 3` (no curriculum, N=3 is the minimum for winner-select transitions).
+5. `GEN_EXPERIENCE_BY_EPOCH = True`, `ENDGAME_FRACTION = 0` (no endgame buffer — this experiment must let winner-select transitions compete fairly).
 
-**Design:**
-- `STARTING_NET = ME(2) E_5000` checkpoint
-- `N_LAST_STATES_INIT = N_LAST_STATES_FINAL = 3` (fixed, no curriculum — N=3 is the minimum for Outcome=+1 select samples)
-- Freeze `fc2_place` parameters only; trunk and `fc2_select` train freely
-- `LR_SELECT = 5e-3` (5–10× base LR) on `fc2_select`; trunk at `LR = 7e-4`
+**Model parameter names** (from `QuartoCNNAutoreg`):
+`fc_in_aux`, `phase_embedding`, `conv1`, `conv2`, `fc1`, `fc2_place` (freeze), `fc2_select` (high LR).
+
+**Key hyperparameters:**
+- `STARTING_NET`: `CHECKPOINTS/ME_endgame(2)0429_ENDGAME_FRACTION_0.5/20260507_0829-ME_endgame(2)0429_ENDGAME_FRACTION_0.5_E_5000.pt`
+- `LR = 7e-4` (trunk), `LR_SELECT = 5e-3` (7× select head)
+- `TAU = 0.01`, `GAMMA = 0.99`, `BATCH_SIZE = 32`, `MAX_GRAD_NORM = 1.0`
+- `MATCHES_PER_EPOCH = 32`, `NUM_EPOCHs_BUFFER = 8`
+- `ARCHITECTURE = QuartoCNNAutoreg`, `TRANSITION_SCHEMA = "decoupled_autoreg"`
+- `DECOUPLED_TARGET_STYLE = "td_place_mc_select"`, `REWARD_FUNCTION = "final"`
 - `EPOCHS = 2000`
-- **Primary diagnostic:** Q_select Outcome=+1 panel in qv_progress. If it shows any band separation after 500 epochs → gradient starvation was the dominant cause. If it stays flat → the problem is schema labeling or trunk representation.
-- **Compare to:** MB(2) at N=3 (45.8% WR) — the known flat-Q_select N=3 baseline.
+
+**Sweep:** one variant is enough to test the hypothesis (`N=3`, single run).
+
+**Primary diagnostic:** Q_select qv_progress. If the Outcome=+1 band separates from Outcome=−1 after 500 epochs → gradient starvation was dominant. If it stays flat → trunk representation or class imbalance (proceed to Nf_balanceSelect).
+
+**Secondary diagnostic:** WR vs ME(2) bot. Even with Q_select dead, loading ME(2) weights and training at N=3 may hurt WR if the trunk updates degrade Q_place. If WR drops below 40% → trunk is being corrupted; add `requires_grad=False` to trunk params too and only train `fc2_select`.
+
+**Compare to:** MB(2) at N=3 (45.8% WR vs bot_loss-BT), ME(2) loaded model (73.4%).
+
+---
+
+## Nf_balanceSelect — Balanced Select Buffer (PLANNED)
+
+**Hypothesis:** Q_select failure is primarily class imbalance. Even with full gradient flow, the optimizer converges to a negative attractor because loser-select transitions outnumber winner-select 2:1 in the curriculum and 100:0 in the endgame buffer. Balancing the select-training distribution to 1:1 should let Q_select reach the same separation Q_place achieves.
+
+**Code change:**
+Add a second replay buffer `winner_select_buffer` that stores only transitions where `phase==PHASE_SELECT and outcome==+1`. During the training loop, mix from four sources per batch:
+- Regular curriculum (place + select, full distribution)
+- Endgame buffer (as in ME(2), fraction=0.5)
+- Winner-select buffer (separate, sampled to make winner-select 50% of all select samples in each batch)
+
+**Implementation sketch:**
+```python
+# After gen_experience, extract winner-select slice:
+sel_win_mask = (exp['phase'] == PHASE_SELECT) & (exp['outcome'] == 1.0)
+winner_select_exp = exp[sel_win_mask]
+winner_select_buffer.extend(winner_select_exp)
+
+# In batch construction:
+# target: of BATCH_SIZE transitions, half are select (16), of those half winner (8)
+# → sample 8 from winner_select_buffer, 8 loser-select from regular buffer,
+#    remaining 16 from place-only transitions
+```
+
+**Key hyperparameters (copy from ME(2) unless noted):**
+- `STARTING_NET = None` (train from scratch, same as ME(2)) OR `STARTING_NET = ME(2)` (fine-tune)
+- `N_LAST_STATES_INIT = 2, N_LAST_STATES_FINAL = 4, ENDGAME_FRACTION = 0.5` (replicate ME(2) curriculum)
+- `LR = 7e-4`, `TAU = 0.01`, `EPOCHS = 5000`
+- `ARCHITECTURE = QuartoCNNAutoreg`, `TRANSITION_SCHEMA = "decoupled_autoreg"`
+- `DECOUPLED_TARGET_STYLE = "td_place_mc_select"`, `REWARD_FUNCTION = "final"`
+
+**Sweep:** two variants — `(1)` train from scratch; `(2)` fine-tune from ME(2) E_5000.
+
+**Decision gate:** Q_select qv_progress Outcome=+1 band separates at N=3. If it does → class imbalance was the bottleneck, balance is the fix. If it does not → MC target quality is the issue (proceed to Ng_auxSelect).
