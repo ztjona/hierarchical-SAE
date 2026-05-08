@@ -203,13 +203,17 @@ def plot_Qv_progress(
     elif hasattr(group_values, "detach"):
         group_values = group_values.detach().cpu().numpy()
 
-    # Use minimum size across all epochs to ensure all indices are valid
-    # This handles cases where different epochs have different numbers of samples
+    # Use the largest exp batch size (typically the final epoch) so all sample
+    # positions visible in the current epoch are tracked. Epochs with smaller
+    # batches contribute NaN for out-of-range indices, which the per-group mean
+    # handles via nanmean. The previous min() approach silently dropped all
+    # sample positions beyond epoch-0's batch size (e.g. winner-select
+    # transitions that only appear once N≥3 is reached).
     if not q_place_history:
         return
 
-    min_size_across_epochs = min(q.shape[0] for q in q_place_history)
-    batch_size = min(group_values.shape[0], min_size_across_epochs)
+    max_size_across_epochs = max(q.shape[0] for q in q_place_history)
+    batch_size = min(group_values.shape[0], max_size_across_epochs)
     n_epochs = len(q_place_history)
 
     if batch_size == 0:
@@ -264,7 +268,10 @@ def plot_Qv_progress(
             # Plot individual Q-value trajectories
             q_values_all = []  # Collect all Q-values for computing mean
             for i in indices:
-                q_sample = np.array([q[i].item() for q in q_history], dtype=float)
+                q_sample = np.array(
+                    [q[i].item() if i < len(q) else float("nan") for q in q_history],
+                    dtype=float,
+                )
                 if not np.isfinite(q_sample).any():
                     continue
                 q_values_all.append(q_sample)
