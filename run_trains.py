@@ -71,7 +71,7 @@ from docopt import docopt
 
 EXPERIMENT_NAME = "" # defined by CLI
 PARAM_ITERATE = "N_LAST_STATES_INIT"
-PARAMS = [2, 3, 4, 6, 12, 16]
+PARAMS = [2, 3, 4, 12]
 
 # Path to the original training script
 TRAIN_SCRIPT = "trainRL.py"

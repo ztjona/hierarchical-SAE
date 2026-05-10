@@ -45,16 +45,16 @@ logger.info("Imports done.")
 
 # STARTING_NET = "CHECKPOINTS\\Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8\\20260227_1103-Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8_E_5000.pt"
 STARTING_NET = None  # Set to None to start with random weights
-EXPERIMENT_NAME = "MD_unbound"
+EXPERIMENT_NAME = "OA_unifiedAux"
 CHECKPOINT_FOLDER = f"./CHECKPOINTS/{EXPERIMENT_NAME}/"
 # TRANSITION_SCHEMA options: "joint", "decoupled_autoreg", or "unified_autoreg"
 # Architecture, bot, and schema must be changed together:
 #   "joint"             → QuartoCNN / QuartoCNN_uncoupled / QuartoCNN_unbound  +  Quarto_bot
 #   "decoupled_autoreg" → QuartoCNNAutoreg / QuartoCNNAutoregUnbound           +  Quarto_autoreg_bot
 #   "unified_autoreg"   → QuartoCNNAutoregUnified / QuartoCNNAutoregUnifiedUnbound + Quarto_unified_bot
-TRANSITION_SCHEMA = "decoupled_autoreg"
-ARCHITECTURE = QuartoCNNAutoregUnbound
-PLAYER_BOT_CLASS = Quarto_autoreg_bot
+TRANSITION_SCHEMA = "unified_autoreg"
+ARCHITECTURE = QuartoCNNAutoregUnified
+PLAYER_BOT_CLASS = Quarto_unified_bot
 # ARCHITECTURE = QuartoCNNAutoreg                  # ← use with decoupled_autoreg
 # PLAYER_BOT_CLASS = Quarto_autoreg_bot             # ← use with decoupled_autoreg
 # ARCHITECTURE = QuartoCNNAutoregUnified            # ← use with unified_autoreg (tanh)
