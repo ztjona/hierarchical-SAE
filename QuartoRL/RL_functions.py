@@ -31,6 +31,7 @@ TRANSITION_SCHEMA_DECOUPLED_AUTOREG = "decoupled_autoreg"
 
 DECOUPLED_TARGET_TD_PLACE_MC_SELECT = "td_place_mc_select"
 DECOUPLED_TARGET_MC_BOTH = "mc_both"
+DECOUPLED_TARGET_TD_PLACE_TD_SELECT = "td_place_td_select"
 DISCOUNT_REWARD_GAMMA = 0.8
 
 PHASE_PLACE = 0
@@ -959,10 +960,15 @@ def DQN_training_step_decoupled_autoreg(
         select phase; select uses Monte Carlo outcome supervision.
       - "mc_both": both heads use Monte Carlo outcome supervision
         (gamma^steps_to_terminal * outcome). target_net is not read.
+      - "td_place_td_select": place uses TD/Bellman; select uses a 1-step
+        Q_place_target bootstrap — target_select = γ * max_a Q_place_target(s').
+        No Q_select self-bootstrap, no MC variance, no outcome-label imbalance.
+        (Ng_auxSelect diagnostic.)
     """
     if TARGET_STYLE not in (
         DECOUPLED_TARGET_TD_PLACE_MC_SELECT,
         DECOUPLED_TARGET_MC_BOTH,
+        DECOUPLED_TARGET_TD_PLACE_TD_SELECT,
     ):
         raise ValueError(f"Unknown decoupled target style {TARGET_STYLE}")
 
@@ -1029,6 +1035,43 @@ def DQN_training_step_decoupled_autoreg(
     expected_select = (
         GAMMA ** exp_batch["steps_to_terminal"][select_mask]
     ) * exp_batch["outcome"][select_mask]
+
+    if TARGET_STYLE == DECOUPLED_TARGET_TD_PLACE_TD_SELECT:
+        # Ng_auxSelect: replace MC target for Q_select with a 1-step Q_place
+        # bootstrap.  For each select transition, the next transition is a place
+        # transition for the *same* player (in decoupled-autoreg the select
+        # immediately precedes the opponent's place, so next_phase==PLACE_PLACE).
+        # target_select = γ * max_a Q_place_target(next_state)
+        # This uses the already-well-trained place head as a supervised oracle —
+        # no Q_select self-bootstrap, no MC variance, no outcome-label imbalance.
+        if select_mask.any():
+            non_terminal_select_mask = select_mask & ~exp_batch["done"]
+            if non_terminal_select_mask.any():
+                with torch.no_grad():
+                    # Use Q_place (not q_values_phase) so we always read the
+                    # place head regardless of next_phase label.
+                    next_q_place, _ = target_net(
+                        exp_batch["next_state_board"][non_terminal_select_mask],
+                        exp_batch["next_state_aux"][non_terminal_select_mask],
+                        phase=exp_batch["next_phase"][non_terminal_select_mask],
+                    )
+                    next_valid = exp_batch["next_valid_mask"][non_terminal_select_mask]
+                    next_place_max = _masked_max(next_q_place, next_valid)
+                # Rebuild expected_select tensor for the full select slice
+                expected_select_full = torch.zeros(
+                    select_mask.sum(), device=exp_batch["reward"].device
+                )
+                # Index into non-terminal rows within the select slice
+                non_terminal_within_select = (~exp_batch["done"])[select_mask]
+                expected_select_full[non_terminal_within_select] = (
+                    GAMMA * next_place_max
+                )
+                # terminal select rows stay 0 (done → no next state)
+                expected_select = expected_select_full
+            else:
+                expected_select = torch.zeros(
+                    select_mask.sum(), device=exp_batch["reward"].device
+                )
 
     return (
         state_place_values,

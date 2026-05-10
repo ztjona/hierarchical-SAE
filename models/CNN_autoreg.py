@@ -199,3 +199,123 @@ class QuartoCNNAutoregLowDropout(_QuartoCNNAutoregBase):
 
     def _apply_output_activation(self, logits: torch.Tensor) -> torch.Tensor:
         return torch.tanh(logits)
+
+
+class QuartoCNNAutoregSepTrunks(NN_abstract):
+    """Separate convolutional trunks for place and select heads.
+
+    Nh_sepTrunks diagnostic: tests whether shared-trunk gradient interference
+    is suppressing Q_select. Each head gets its own conv1→conv2→fc1 stack;
+    the only shared parameters are the piece-feature encoder (fc_in_aux) and
+    the input board channels. No phase embedding — it is not needed because
+    the routing is handled structurally.
+    """
+
+    def __init__(self):
+        super().__init__()
+
+        fc_aux_size = 16
+        trunk_in_channels = 16 + (fc_aux_size // 16)  # board + aux_map, no phase channel
+        k1_size = 16
+        k2_size = 32
+        n_neurons = 128
+
+        # Shared piece encoder (same input for both trunks)
+        self.fc_in_aux = nn.Linear(16, fc_aux_size)
+
+        # Place trunk
+        self.conv1_place = nn.Conv2d(trunk_in_channels, k1_size, kernel_size=3, padding=1)
+        self.conv2_place = nn.Conv2d(k1_size, k2_size, kernel_size=3, padding=1)
+        self.fc1_place = nn.Linear(k2_size * 4 * 4, n_neurons)
+        self.dropout_place = nn.Dropout(0.5)
+        self.fc2_place = nn.Linear(n_neurons, 16)
+
+        # Select trunk
+        self.conv1_select = nn.Conv2d(trunk_in_channels, k1_size, kernel_size=3, padding=1)
+        self.conv2_select = nn.Conv2d(k1_size, k2_size, kernel_size=3, padding=1)
+        self.fc1_select = nn.Linear(k2_size * 4 * 4, n_neurons)
+        self.dropout_select = nn.Dropout(0.5)
+        self.fc2_select = nn.Linear(n_neurons, 16)
+
+    @property
+    def name(self) -> str:
+        return "QuartoCNN_autoreg_sep_trunks"
+
+    def _encode_input(
+        self,
+        x_board: torch.Tensor | np.ndarray,
+        x_aux: torch.Tensor | np.ndarray,
+    ) -> torch.Tensor:
+        if isinstance(x_board, np.ndarray):
+            x_board = torch.from_numpy(x_board).float()
+        if isinstance(x_aux, np.ndarray):
+            x_aux = torch.from_numpy(x_aux).float()
+        x_board = x_board.to(self.device)
+        x_aux = x_aux.to(self.device)
+        aux_feat = F.relu(self.fc_in_aux(x_aux))
+        aux_map = aux_feat.view(-1, 1, 4, 4)
+        return torch.cat([x_board, aux_map], dim=1)  # (B, trunk_in_channels, 4, 4)
+
+    def _trunk_place(self, x: torch.Tensor) -> torch.Tensor:
+        x = F.relu(self.conv1_place(x))
+        x = F.relu(self.conv2_place(x))
+        x = x.flatten(start_dim=1)
+        x = F.relu(self.fc1_place(x))
+        return self.dropout_place(x)
+
+    def _trunk_select(self, x: torch.Tensor) -> torch.Tensor:
+        x = F.relu(self.conv1_select(x))
+        x = F.relu(self.conv2_select(x))
+        x = x.flatten(start_dim=1)
+        x = F.relu(self.fc1_select(x))
+        return self.dropout_select(x)
+
+    def forward(
+        self,
+        x_board: torch.Tensor | np.ndarray,
+        x_aux: torch.Tensor | np.ndarray,
+        phase=None,  # accepted but ignored — routing is structural
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        x = self._encode_input(x_board, x_aux)
+        q_place = torch.tanh(self.fc2_place(self._trunk_place(x)))
+        q_select = torch.tanh(self.fc2_select(self._trunk_select(x)))
+        return q_place, q_select
+
+    def q_values_phase(
+        self,
+        x_board: torch.Tensor,
+        x_aux: torch.Tensor,
+        phase,
+    ) -> torch.Tensor:
+        q_place, q_select = self.forward(x_board, x_aux)
+        # normalise phase to a tensor for masking
+        if isinstance(phase, (int, str)):
+            phase_idx = PHASE_SELECT if phase in (PHASE_SELECT, "select") else PHASE_PLACE
+            batch_size = x_board.shape[0] if hasattr(x_board, "shape") else 1
+            phase_tensor = torch.full(
+                (batch_size,), phase_idx, dtype=torch.long, device=q_place.device
+            )
+        elif isinstance(phase, torch.Tensor):
+            phase_tensor = phase.to(dtype=torch.long, device=q_place.device)
+        else:
+            phase_tensor = torch.tensor(phase, dtype=torch.long, device=q_place.device)
+        select_mask = phase_tensor == PHASE_SELECT
+        return torch.where(select_mask.unsqueeze(1), q_select, q_place)
+
+    def predict_phase(
+        self,
+        x_board: torch.Tensor,
+        x_aux: torch.Tensor,
+        *,
+        phase,
+        TEMPERATURE: float = 1.0,
+        DETERMINISTIC: bool = True,
+    ) -> torch.Tensor:
+        assert x_board.shape[0] == 1
+        self.eval()
+        with torch.no_grad():
+            q_values = self.q_values_phase(x_board, x_aux, phase=phase)
+            if DETERMINISTIC:
+                return torch.argsort(q_values, descending=True, dim=1)
+            probs = F.softmax(q_values / TEMPERATURE, dim=1)
+            return torch.multinomial(probs, probs.shape[1], replacement=False)
