@@ -1,0 +1,68 @@
+[
+  {
+    "checkpoint": "CHECKPOINTS\\LOSS_APPROACHs_1212-2_only_select\\20251212_2206-LOSS_APPROACHs_1212-2_only_select_E_1034.pt",
+    "arch": "QuartoCNN_uncoupled",
+    "schema": "joint",
+    "loss_approach": "mc_select",
+    "n_batches": 16,
+    "n_batches_used": 16,
+    "batch_size": 64,
+    "experience_pool_size": 383,
+    "L_place_mean": 0.6607764959335327,
+    "L_select_mean": 0.42633455991744995,
+    "cosine": {
+      "all": {
+        "mean": 0.23110529780387878,
+        "std": 0.31816476583480835
+      },
+      "trunk": {
+        "mean": 0.2515566051006317,
+        "std": 0.3421218991279602
+      },
+      "place_head": {
+        "mean": null,
+        "std": null
+      },
+      "select_head": {
+        "mean": null,
+        "std": null
+      }
+    },
+    "grad_norm_place": {
+      "all": {
+        "mean": 2.30551815032959,
+        "std": 0.8646681308746338
+      },
+      "trunk": {
+        "mean": 2.2077786922454834,
+        "std": 0.8872188925743103
+      },
+      "place_head": {
+        "mean": 0.6284329891204834,
+        "std": 0.09885549545288086
+      },
+      "select_head": {
+        "mean": 0.0,
+        "std": 0.0
+      }
+    },
+    "grad_norm_select": {
+      "all": {
+        "mean": 0.008180033415555954,
+        "std": 0.009309167042374611
+      },
+      "trunk": {
+        "mean": 0.007943427190184593,
+        "std": 0.009075489826500416
+      },
+      "place_head": {
+        "mean": 0.0,
+        "std": 0.0
+      },
+      "select_head": {
+        "mean": 0.0018426848109811544,
+        "std": 0.0021779537200927734
+      }
+    }
+  }
+]
