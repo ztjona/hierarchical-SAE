@@ -12,7 +12,11 @@ Usage:
 
 Options:
     --data <path>         Input .npz file   [default: projects/supervised-cloning/data/collected_5k.npz]
-    --out <path>          Checkpoint dir    [default: projects/supervised-cloning/checkpoints]
+    --exp <name>          Experiment name, e.g. A1_baseline_cnn.  Output goes to
+                          projects/supervised-cloning/experiments/<name>/
+                          Overrides --out when provided.
+    --out <path>          Checkpoint dir (ignored when --exp is set)
+                          [default: projects/supervised-cloning/checkpoints]
     --epochs <int>        Training epochs   [default: 150]
     --batch <int>         Batch size        [default: 256]
     --lr <float>          Learning rate     [default: 1e-3]
@@ -80,30 +84,28 @@ def _flip_board(board: np.ndarray) -> np.ndarray:
     return np.flip(board, axis=2).copy()
 
 
-def _transform_pos_index(idx: int, transform_id: int) -> int:
-    """Map a flat position index [0-15] through one of the 8 symmetries.
+def _pos_inv(idx: int, transform_id: int) -> int:
+    """Inverse map: given a NEW position index, return the ORIGINAL position.
 
-    transform_id:
-        0 = identity
-        1 = rot90  (CCW)
-        2 = rot180
-        3 = rot270
-        4 = flip-H
-        5 = rot90  + flip-H
-        6 = rot180 + flip-H
-        7 = rot270 + flip-H
+    numpy rot90(k=1, axes=(2,3)) rotates CCW, so the inverse is CW:
+      new (r,c) came from old (c, 3-r).
+    Used with gather indexing for masks: new_mask[i] = old_mask[perm_inv[i]].
     """
     r, c = divmod(idx, 4)
     for _ in range(transform_id % 4):
-        r, c = c, 3 - r  # 90° CCW: (r,c) -> (c, 3-r)
+        r, c = c, 3 - r  # CW: inverse of CCW
     if transform_id >= 4:
-        c = 3 - c  # horizontal flip
+        c = 3 - c  # flip is self-inverse
     return r * 4 + c
 
 
-# Precompute the 8 position-index permutation tables once.
-_POS_PERMS: list[list[int]] = [
-    [_transform_pos_index(i, t) for i in range(16)] for t in range(8)
+# Inverse permutation tables (new_pos -> old_pos): used for masks (gather).
+_POS_PERMS_INV: list[np.ndarray] = [
+    np.array([_pos_inv(i, t) for i in range(16)], dtype=np.int64) for t in range(8)
+]
+# Forward permutation tables (old_pos -> new_pos): used for PLACE labels.
+_POS_PERMS_FWD: list[np.ndarray] = [
+    np.argsort(p).astype(np.int64) for p in _POS_PERMS_INV
 ]
 
 
@@ -124,9 +126,10 @@ def augment_symmetries(
     aug_boards, aug_pieces, aug_labels, aug_actions, aug_masks = [], [], [], [], []
 
     for t in range(8):
-        perm = np.array(_POS_PERMS[t], dtype=np.int64)  # (16,)
+        perm_inv = _POS_PERMS_INV[t]  # new_pos → old_pos  (for masks)
+        perm_fwd = _POS_PERMS_FWD[t]  # old_pos → new_pos  (for labels)
 
-        # Transform boards: rotate / flip the spatial dims
+        # Transform boards: rotate / flip the spatial dims (CCW rotation)
         b = boards  # (N, 16, 4, 4)
         for _ in range(t % 4):
             b = np.rot90(b, k=1, axes=(2, 3))
@@ -134,13 +137,16 @@ def augment_symmetries(
             b = np.flip(b, axis=3)
         b = b.copy()
 
-        # Transform legal masks: reorder the 16 position slots
-        m = legal_masks[:, perm]  # (N, 16)
+        # Mask transform: only PLACE masks are board-position-based.
+        # SELECT masks are piece-availability masks — board rotation doesn't change them.
+        m = legal_masks.copy()
+        place_bool = actions == ACTION_PLACE
+        m[place_bool] = legal_masks[place_bool][:, perm_inv]  # (N_place, 16)
 
-        # Transform PLACE labels via the same permutation
+        # PLACE labels: forward map — new_label = perm_fwd[old_label]
         lbl = labels.copy()
         place_mask = actions == ACTION_PLACE
-        lbl[place_mask] = perm[lbl[place_mask]]
+        lbl[place_mask] = perm_fwd[lbl[place_mask]]
 
         aug_boards.append(b)
         aug_pieces.append(pieces)
@@ -341,7 +347,11 @@ def main():
     lam = float(args["--lam"])
     seed = int(args["--seed"])
     data_p = Path(args["--data"])
-    out_dir = Path(args["--out"])
+    exp_name = args["--exp"]
+    if exp_name:
+        out_dir = Path("projects/supervised-cloning/experiments") / exp_name
+    else:
+        out_dir = Path(args["--out"])
 
     random.seed(seed)
     np.random.seed(seed)
@@ -352,7 +362,7 @@ def main():
     print(f"Device   : {device}")
     print(f"Data     : {data_p}")
     print(f"Output   : {out_dir}")
-    print(f"Epochs   : {epochs}  |  Batch: {batch}  |  LR: {lr}  |  λ: {lam}\n")
+    print(f"Epochs   : {epochs}  |  Batch: {batch}  |  LR: {lr}  |  lam: {lam}\n")
 
     train_ds, val_ds = load_split(data_p, val_spl, seed)
     print(f"Train samples: {len(train_ds):,}  |  Val samples: {len(val_ds):,}\n")
@@ -493,6 +503,65 @@ def main():
     plot_path = out_dir / "training_curves.png"
     plt.savefig(plot_path, dpi=120)
     print(f"Training curves   : {plot_path}")
+
+    # ── write summary .md ─────────────────────────────────────────────────────
+    from datetime import datetime
+
+    final_tr = history["train_loss"][-1]
+    final_va = history["val_loss"][-1]
+    best_ep = (
+        int(
+            np.argmax(
+                [
+                    (p + s) / 2
+                    for p, s in zip(history["val_place_acc"], history["val_sel_acc"])
+                ]
+            )
+        )
+        + 1
+    )
+    md_lines = [
+        f"# Training Summary — {exp_name or out_dir.name}",
+        f"",
+        f"**Date**: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        f"",
+        f"## Config",
+        f"| Key | Value |",
+        f"|-----|-------|",
+        f"| data | `{data_p}` |",
+        f"| epochs | {epochs} |",
+        f"| batch | {batch} |",
+        f"| lr | {lr} |",
+        f"| λ (select weight) | {lam} |",
+        f"| val_split | {val_spl} |",
+        f"| seed | {seed} |",
+        f"| device | {device} |",
+        f"",
+        f"## Dataset",
+        f"| | Samples |",
+        f"|--|--|",
+        f"| train (after aug) | {len(train_ds):,} |",
+        f"| val (no aug) | {len(val_ds):,} |",
+        f"",
+        f"## Results",
+        f"| Metric | Train | Val |",
+        f"|--------|-------|-----|",
+        f"| Best epoch | — | {best_ep} |",
+        f"| Best val acc (avg heads) | — | {best_val_acc:.2%} |",
+        f"| Final loss | {final_tr:.4f} | {final_va:.4f} |",
+        f"| PLACE top-1 (final) | {history['train_place_acc'][-1]:.2%} | {history['val_place_acc'][-1]:.2%} |",
+        f"| PLACE top-3 (final) | {history['train_place_top3'][-1]:.2%} | {history['val_place_top3'][-1]:.2%} |",
+        f"| SELECT top-1 (final) | {history['train_sel_acc'][-1]:.2%} | {history['val_sel_acc'][-1]:.2%} |",
+        f"| SELECT top-3 (final) | {history['train_sel_top3'][-1]:.2%} | {history['val_sel_top3'][-1]:.2%} |",
+        f"",
+        f"![Training curves](training_curves.png)",
+        f"",
+        f"## Notes",
+        f"",
+    ]
+    md_path = out_dir / "summary.md"
+    md_path.write_text("\n".join(md_lines), encoding="utf-8")
+    print(f"Summary           : {md_path}")
 
 
 if __name__ == "__main__":
