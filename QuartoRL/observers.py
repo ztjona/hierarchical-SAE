@@ -375,7 +375,8 @@ def plot_Qv_progress(
                     if hasattr(q_epoch, "detach")
                     else np.array(q_epoch)
                 )
-                q_subset = q_epoch_arr[indices].flatten()
+                valid_indices = [i for i in indices if i < len(q_epoch_arr)]
+                q_subset = q_epoch_arr[valid_indices].flatten()
                 q_subset = q_subset[np.isfinite(q_subset)]
                 hist, _ = np.histogram(q_subset, bins=HIST_BINS, range=HIST_RANGE)
                 # Normalize to percentage
