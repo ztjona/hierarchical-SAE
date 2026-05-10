@@ -57,6 +57,18 @@ from docopt import docopt
 # PARAMS = [2, 3, 4, 6, 12, 16]
 
 # EXPERIMENT_NAME = "Z_tempRegresive"
+
+# Series O — unified-aux variant of the decoupled-autoreg trunk.
+# Before running this sweep, edit trainRL.py:
+#   TRANSITION_SCHEMA = "unified_autoreg"
+#   ARCHITECTURE = QuartoCNNAutoregUnified  (or QuartoCNNAutoregUnifiedUnbound)
+#   PLAYER_BOT_CLASS = Quarto_unified_bot
+# OA_unifiedAux is the first sweep of code-version O. Compare to MB_final
+# (matched LR/TAU/REWARD_FUNCTION) for the WR delta from input redesign alone.
+# EXPERIMENT_NAME = "OA_unifiedAux"
+# PARAM_ITERATE = "N_LAST_STATES_INIT"
+# PARAMS = [2, 3, 4]
+
 EXPERIMENT_NAME = "" # defined by CLI
 PARAM_ITERATE = "N_LAST_STATES_INIT"
 PARAMS = [2, 3, 4, 6, 12, 16]

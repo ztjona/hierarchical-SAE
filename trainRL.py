@@ -10,10 +10,16 @@ from torchrl.data.replay_buffers.storages import LazyTensorStorage
 from torchrl.data.replay_buffers.samplers import SamplerWithoutReplacement
 from bot.CNN_bot import Quarto_bot
 from bot.CNN_autoreg_bot import Quarto_bot as Quarto_autoreg_bot
+from bot.CNN_unified_bot import Quarto_bot as Quarto_unified_bot
 from models.CNN1 import QuartoCNN
 from models.CNN_uncoupled import QuartoCNN as QuartoCNN_uncoupled
 from models.CNN_unbound import QuartoCNN as QuartoCNN_unbound
-from models.CNN_autoreg import QuartoCNNAutoreg, QuartoCNNAutoregUnbound
+from models.CNN_autoreg import (
+    QuartoCNNAutoreg,
+    QuartoCNNAutoregUnbound,
+    QuartoCNNAutoregUnified,
+    QuartoCNNAutoregUnifiedUnbound,
+)
 from QuartoRL import (
     gen_experience,
     run_contest,
@@ -41,26 +47,32 @@ logger.info("Imports done.")
 STARTING_NET = None  # Set to None to start with random weights
 EXPERIMENT_NAME = "MD_unbound"
 CHECKPOINT_FOLDER = f"./CHECKPOINTS/{EXPERIMENT_NAME}/"
-# TRANSITION_SCHEMA options: "joint" or "decoupled_autoreg"
+# TRANSITION_SCHEMA options: "joint", "decoupled_autoreg", or "unified_autoreg"
 # Architecture, bot, and schema must be changed together:
 #   "joint"             → QuartoCNN / QuartoCNN_uncoupled / QuartoCNN_unbound  +  Quarto_bot
 #   "decoupled_autoreg" → QuartoCNNAutoreg / QuartoCNNAutoregUnbound           +  Quarto_autoreg_bot
+#   "unified_autoreg"   → QuartoCNNAutoregUnified / QuartoCNNAutoregUnifiedUnbound + Quarto_unified_bot
 TRANSITION_SCHEMA = "decoupled_autoreg"
 ARCHITECTURE = QuartoCNNAutoregUnbound
 PLAYER_BOT_CLASS = Quarto_autoreg_bot
-# ARCHITECTURE = QuartoCNNAutoreg       # ← use with decoupled_autoreg
-# PLAYER_BOT_CLASS = Quarto_autoreg_bot  # ← use with decoupled_autoreg
-# ARCHITECTURE = QuartoCNN              # ← other joint alternatives
+# ARCHITECTURE = QuartoCNNAutoreg                  # ← use with decoupled_autoreg
+# PLAYER_BOT_CLASS = Quarto_autoreg_bot             # ← use with decoupled_autoreg
+# ARCHITECTURE = QuartoCNNAutoregUnified            # ← use with unified_autoreg (tanh)
+# ARCHITECTURE = QuartoCNNAutoregUnifiedUnbound     # ← use with unified_autoreg (no tanh)
+# PLAYER_BOT_CLASS = Quarto_unified_bot              # ← use with unified_autoreg
+# ARCHITECTURE = QuartoCNN                          # ← other joint alternatives
 # ARCHITECTURE = QuartoCNN_unbound
 
-# Only used when TRANSITION_SCHEMA = "decoupled_autoreg".
+# Used when TRANSITION_SCHEMA = "decoupled_autoreg" or "unified_autoreg".
 #   "td_place_mc_select" -> place uses TD/Bellman, select uses Monte Carlo return
 #   "mc_both"            -> both phases use Monte Carlo return
 DECOUPLED_TARGET_STYLE = "td_place_mc_select"  # Options: "td_place_mc_select", "mc_both"
 
 
 def estimate_steps_per_match(n_last_states: int, transition_schema: str) -> int:
-    if transition_schema == "decoupled_autoreg":
+    # Both autoreg schemas store one row per action phase, so the per-match
+    # transition count is the same.
+    if transition_schema in ("decoupled_autoreg", "unified_autoreg"):
         return max(1, 2 * n_last_states - 1)
     return n_last_states
 
@@ -383,7 +395,7 @@ for e in tqdm(
             TRANSITION_SCHEMA=TRANSITION_SCHEMA,
             DECOUPLED_TARGET_STYLE=DECOUPLED_TARGET_STYLE,
         )
-        if TRANSITION_SCHEMA == "decoupled_autoreg":
+        if TRANSITION_SCHEMA in ("decoupled_autoreg", "unified_autoreg"):
             q_place, target_place, q_select, target_select = dqn_result  # type: ignore
             active_losses: list[torch.Tensor] = []
             if q_place.numel() > 0:
@@ -392,7 +404,7 @@ for e in tqdm(
                 active_losses.append(loss_fcn(q_select, target_select))
             if not active_losses:
                 raise ValueError(
-                    "Decoupled batch produced no active place/select samples."
+                    "Per-phase batch produced no active place/select samples."
                 )
             loss = torch.stack(active_losses).mean()
         elif LOSS_APPROACH in ("separate_bellman", "mc_select"):

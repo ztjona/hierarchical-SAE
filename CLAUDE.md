@@ -20,6 +20,7 @@ These are non-obvious contracts that span files or that have already bitten us. 
 - **Place and select are independent action spaces.** Take `max` over each head independently, never over averaged logits (this was the correct half of commit `51b59ba`).
 - **`mode_2x2=True` is the default across training and evaluation.** Keep it consistent — a bot trained with 2×2 wins against a no-2×2 baseline isn't a valid comparison.
 - **Pickled results may contain CUDA tensors.** Use the `CPUUnpickler` pattern in `tools/view_qv.py` when loading `CHECKPOINTS/<exp>/<exp>.pkl` on a CPU-only machine.
+- **`TRANSITION_SCHEMA` is a triplet contract** (schema name × model class × bot class). The three valid combinations are documented at the top of `trainRL.py`. `joint` uses `QuartoCNN*` + `Quarto_bot`; `decoupled_autoreg` uses `QuartoCNNAutoreg*` + `Quarto_autoreg_bot`; `unified_autoreg` uses `QuartoCNNAutoregUnified*` + `Quarto_unified_bot`. Mixing a model from one row with a bot/schema from another will silently produce wrong aux semantics — no exception, just bad gradients. The `unified_autoreg` schema reuses the `DQN_training_step_decoupled_autoreg` target machinery, so target rules (`DECOUPLED_TARGET_STYLE`) apply to both autoreg schemas.
 
 ## Adding a new experiment
 

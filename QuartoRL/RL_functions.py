@@ -28,6 +28,7 @@ import pandas as pd
 
 TRANSITION_SCHEMA_JOINT = "joint"
 TRANSITION_SCHEMA_DECOUPLED_AUTOREG = "decoupled_autoreg"
+TRANSITION_SCHEMA_UNIFIED_AUTOREG = "unified_autoreg"
 
 DECOUPLED_TARGET_TD_PLACE_MC_SELECT = "td_place_mc_select"
 DECOUPLED_TARGET_MC_BOTH = "mc_both"
@@ -36,6 +37,8 @@ DISCOUNT_REWARD_GAMMA = 0.8
 
 PHASE_PLACE = 0
 PHASE_SELECT = 1
+
+UNIFIED_AUX_DIM = 32  # offered_one_hot (16) ⊕ available_mask (16)
 
 JOINT_TENSORDICT_KEYS = (
     "state_board",
@@ -66,6 +69,11 @@ DECOUPLED_AUTOREG_TENSORDICT_KEYS = (
     "steps_to_terminal",
 )
 
+# unified_autoreg shares the decoupled key set; only state_aux/next_state_aux
+# change shape (16 → 32). Kept as a separate constant so call sites can verify
+# the schema name independently of the keys it carries.
+UNIFIED_AUTOREG_TENSORDICT_KEYS = DECOUPLED_AUTOREG_TENSORDICT_KEYS
+
 
 def _piece_index_to_vector(piece_index: int) -> np.ndarray:
     if piece_index == -1:
@@ -79,6 +87,18 @@ def _available_pieces_mask(available_pieces: set[int]) -> np.ndarray:
     if available_pieces:
         mask[sorted(available_pieces)] = 1.0
     return mask
+
+
+def _unified_aux(piece_index: int, available_pieces: set[int]) -> np.ndarray:
+    """Build the 32-d phase-stable aux vector for the unified-autoreg schema.
+
+    Layout: ``[offered_one_hot (16) ; available_pieces_mask (16)]``.
+    ``piece_index == -1`` (no offered piece, e.g. the very first select of a
+    game) maps to a zero block.
+    """
+    offered = _piece_index_to_vector(piece_index)
+    available = _available_pieces_mask(available_pieces)
+    return np.concatenate([offered, available]).astype(np.float32)
 
 
 def _valid_position_mask(board_state: str) -> np.ndarray:
@@ -346,6 +366,18 @@ def gen_experience(
     """
     if TRANSITION_SCHEMA == TRANSITION_SCHEMA_DECOUPLED_AUTOREG:
         return gen_experience_decoupled_autoreg(
+            p1_bot=p1_bot,
+            p2_bot=p2_bot,
+            n_last_states=n_last_states,
+            number_of_matches=number_of_matches,
+            verbose=verbose,
+            PROGRESS_MESSAGE=PROGRESS_MESSAGE,
+            mode_2x2=mode_2x2,
+            REWARD_FUNCTION_TYPE=REWARD_FUNCTION_TYPE,
+            COLLECT_BOARDS=COLLECT_BOARDS,
+        )
+    if TRANSITION_SCHEMA == TRANSITION_SCHEMA_UNIFIED_AUTOREG:
+        return gen_experience_unified_autoreg(
             p1_bot=p1_bot,
             p2_bot=p2_bot,
             n_last_states=n_last_states,
@@ -691,6 +723,264 @@ def gen_experience_decoupled_autoreg(
     return experience
 
 
+def gen_experience_unified_autoreg(
+    *,
+    p1_bot: BotAI,
+    p2_bot: BotAI,
+    n_last_states: int = 16,
+    number_of_matches: int = 1000,
+    verbose: bool = False,
+    PROGRESS_MESSAGE: str = "Generating experience",
+    mode_2x2: bool = False,
+    REWARD_FUNCTION_TYPE: str = "propagate",
+    COLLECT_BOARDS: bool = False,
+):
+    """Generate phase-decoupled transitions with phase-stable 32-d aux.
+
+    Mirrors :func:`gen_experience_decoupled_autoreg` row-for-row. The only
+    difference is that ``state_aux`` and ``next_state_aux`` are 32-d
+    ``[offered_one_hot ; available_mask]`` vectors that carry the same input
+    semantics across both phases.
+
+    Aux semantics from the acting player's perspective:
+
+    - place row (about to place ``pending_piece``):
+        offered = pending_piece, available = pieces still in storage
+    - select row (about to give a piece to opponent):
+        offered = piece-just-placed-this-turn (zero-vec for the very first
+        select of the game, before any placement), available = pieces still
+        in storage
+    """
+    logger.debug("Generating unified-autoregressive experience...")
+
+    matches_data, _ = play_games(
+        matches=number_of_matches,
+        player1=p1_bot,
+        player2=p2_bot,
+        delay=0,
+        verbose=verbose,
+        PROGRESS_MESSAGE=PROGRESS_MESSAGE,
+        save_match=False,
+        mode_2x2=mode_2x2,
+    )
+
+    rows: list[dict] = []
+    boards: list[tuple[Board, Board]] = []
+
+    for match_data in matches_data:
+        match_rows: list[dict] = []
+        move_history = match_data["move_history"]
+        match_result = match_data["result"]
+
+        current_board = "0"
+        available_pieces = set(range(16))
+        pending_piece = -1
+        last_placed_piece = -1
+        joint_state_index = 0
+
+        for move_idx, move in enumerate(move_history):
+            action_type = move["action"]
+            player_pos = move["player_pos"]
+            mov_description = f"{move_idx}|{action_type}|{player_pos}"
+            outcome = _actor_outcome(player_pos, match_result)
+
+            if action_type == "selected":
+                state_board = current_board
+                # Unified aux for select: offered=last-piece-I-placed (zero on
+                # the very first select of the game), available=storage pool.
+                state_aux = _unified_aux(last_placed_piece, available_pieces)
+                # valid_mask for a select action is the available-piece mask
+                # (independent of the aux layout).
+                valid_mask = _available_pieces_mask(available_pieces)
+                action = int(move["piece_index"])
+
+                if action not in available_pieces:
+                    raise ValueError(
+                        f"Selected piece {action} not available in storage. {mov_description}"
+                    )
+
+                available_pieces.remove(action)
+                pending_piece = action
+
+                # Next state: opponent is about to place the piece I just gave.
+                # Their aux: offered=pending_piece, available=current storage.
+                next_state_board = current_board
+                next_state_aux = _unified_aux(pending_piece, available_pieces)
+                next_phase = PHASE_PLACE
+                next_valid_mask = _valid_position_mask(current_board)
+
+                match_rows.append(
+                    {
+                        "joint_state_index": joint_state_index,
+                        "mov_description": mov_description,
+                        "board_state": state_board,
+                        "board_next_state": next_state_board,
+                        "state_aux": state_aux,
+                        "valid_mask": valid_mask,
+                        "action": action,
+                        "phase": PHASE_SELECT,
+                        "done": False,
+                        "next_state_aux": next_state_aux,
+                        "next_phase": next_phase,
+                        "next_valid_mask": next_valid_mask,
+                        "outcome": outcome,
+                    }
+                )
+                joint_state_index += 1
+
+            elif action_type == "placed":
+                if pending_piece == -1:
+                    raise ValueError(
+                        f"Encountered a place action without a pending selected piece. {mov_description}"
+                    )
+
+                state_board = current_board
+                # Unified aux for place: offered=pending_piece (in hand),
+                # available=storage pool (already excludes pending_piece).
+                state_aux = _unified_aux(pending_piece, available_pieces)
+                valid_mask = _valid_position_mask(current_board)
+                action = int(move["position_index"])
+
+                next_state_board = move["board_after"]
+                done = move_idx == len(move_history) - 1
+
+                if done:
+                    # Terminal: aux is zeroed by convention. Targets mask out
+                    # next-state contributions on terminal rows anyway.
+                    next_state_aux = np.zeros(UNIFIED_AUX_DIM, dtype=np.float32)
+                    next_phase = PHASE_SELECT
+                    next_valid_mask = np.zeros(16, dtype=np.float32)
+                else:
+                    # Next state: I'm about to select what to give the opponent.
+                    # My aux: offered=the_piece_I_just_placed (=pending_piece
+                    # before reset), available=current storage.
+                    next_state_aux = _unified_aux(pending_piece, available_pieces)
+                    next_phase = PHASE_SELECT
+                    next_valid_mask = _available_pieces_mask(available_pieces)
+
+                match_rows.append(
+                    {
+                        "joint_state_index": joint_state_index,
+                        "mov_description": mov_description,
+                        "board_state": state_board,
+                        "board_next_state": next_state_board,
+                        "state_aux": state_aux,
+                        "valid_mask": valid_mask,
+                        "action": action,
+                        "phase": PHASE_PLACE,
+                        "done": done,
+                        "next_state_aux": next_state_aux,
+                        "next_phase": next_phase,
+                        "next_valid_mask": next_valid_mask,
+                        "outcome": outcome,
+                    }
+                )
+
+                # Advance the per-actor "what did I just place" tracker before
+                # clearing pending_piece. This is the only state-tracking
+                # difference vs the decoupled generator.
+                current_board = next_state_board
+                last_placed_piece = pending_piece
+                pending_piece = -1
+            else:
+                raise ValueError(f"Unknown action {action_type}")
+
+        if not match_rows:
+            continue
+
+        max_joint_state_index = max(row["joint_state_index"] for row in match_rows)
+        if n_last_states <= max_joint_state_index + 1:
+            joint_cutoff = max_joint_state_index - n_last_states + 1
+            match_rows = [
+                row for row in match_rows if row["joint_state_index"] >= joint_cutoff
+            ]
+
+        total_transitions = len(match_rows)
+        for idx, row in enumerate(match_rows):
+            steps_to_terminal = total_transitions - 1 - idx
+            row["steps_to_terminal"] = steps_to_terminal
+            row["reward"] = _phase_reward(
+                REWARD_FUNCTION_TYPE=REWARD_FUNCTION_TYPE,
+                phase=row["phase"],
+                outcome=row["outcome"],
+                done=row["done"],
+                steps_to_terminal=steps_to_terminal,
+            )
+
+            if COLLECT_BOARDS:
+                boards.append(
+                    (
+                        Board.serialized_2_board(
+                            row["board_state"],
+                            name=(
+                                f"{row['mov_description']} | phase={row['phase']} | "
+                                f"R={row['reward']:.2f}"
+                            ),
+                        ),
+                        Board.serialized_2_board(
+                            row["board_next_state"],
+                            name=(
+                                f"{row['mov_description']} | next_phase={row['next_phase']} | "
+                                f"R={row['reward']:.2f}"
+                            ),
+                        ),
+                    )
+                )
+
+        rows.extend(match_rows)
+
+    if not rows:
+        raise ValueError("No unified-autoregressive experience was generated.")
+
+    p_all = pd.DataFrame(rows)
+
+    experience = TensorDict(
+        {
+            "state_board": torch.tensor(
+                np.stack(p_all["board_state"].apply(Board.deserialize)),
+                dtype=torch.float32,
+            ),
+            "state_aux": torch.tensor(
+                np.stack(p_all["state_aux"].to_list()),
+                dtype=torch.float32,
+            ),
+            "phase": torch.tensor(p_all["phase"].to_numpy(), dtype=torch.int64),
+            "valid_mask": torch.tensor(
+                np.stack(p_all["valid_mask"].to_list()),
+                dtype=torch.float32,
+            ),
+            "action": torch.tensor(p_all["action"].to_numpy(), dtype=torch.int64),
+            "reward": torch.tensor(p_all["reward"].to_numpy(), dtype=torch.float32),
+            "done": torch.tensor(p_all["done"].to_numpy(), dtype=torch.bool),
+            "next_state_board": torch.tensor(
+                np.stack(p_all["board_next_state"].apply(Board.deserialize)),
+                dtype=torch.float32,
+            ),
+            "next_state_aux": torch.tensor(
+                np.stack(p_all["next_state_aux"].to_list()),
+                dtype=torch.float32,
+            ),
+            "next_phase": torch.tensor(
+                p_all["next_phase"].to_numpy(), dtype=torch.int64
+            ),
+            "next_valid_mask": torch.tensor(
+                np.stack(p_all["next_valid_mask"].to_list()),
+                dtype=torch.float32,
+            ),
+            "outcome": torch.tensor(p_all["outcome"].to_numpy(), dtype=torch.float32),
+            "steps_to_terminal": torch.tensor(
+                p_all["steps_to_terminal"].to_numpy(), dtype=torch.float32
+            ),
+        },
+        batch_size=[p_all.shape[0]],
+        device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+    )
+
+    if COLLECT_BOARDS:
+        return experience, boards
+    return experience
+
+
 def DQN_training_step(
     policy_net: NN_abstract,
     target_net: NN_abstract,
@@ -715,10 +1005,12 @@ def DQN_training_step(
     LOSS_APPROACH : str
         Approach for computing state-action values. Options are "combined_avg", "only_select", "only_place", "separate_bellman", "mc_select".
     TRANSITION_SCHEMA : str
-        Transition layout. Options are "joint" and "decoupled_autoreg".
+        Transition layout. Options are "joint", "decoupled_autoreg", and
+        "unified_autoreg" (decoupled targets with phase-stable 32-d aux).
     DECOUPLED_TARGET_STYLE : str
-        Planned target rule for decoupled-autoregressive training. Default is
-        place TD + select Monte Carlo.
+        Target rule for decoupled-autoregressive AND unified-autoregressive
+        training (both share the same per-phase masked target machinery).
+        Default is place TD + select Monte Carlo.
     Returns
     -------
     For "combined_avg", "only_select", "only_place":
@@ -742,7 +1034,14 @@ def DQN_training_step(
     policy_net.train()
     # target_net.eval()  # Target network is always in eval mode
 
-    if TRANSITION_SCHEMA == TRANSITION_SCHEMA_DECOUPLED_AUTOREG:
+    if TRANSITION_SCHEMA in (
+        TRANSITION_SCHEMA_DECOUPLED_AUTOREG,
+        TRANSITION_SCHEMA_UNIFIED_AUTOREG,
+    ):
+        # Unified-autoreg reuses the same per-phase masked target rule as the
+        # decoupled schema; the only difference is state_aux/next_state_aux
+        # dimensionality (32 vs 16), which is consumed inside the model's
+        # ``q_values_phase``. No code change is required at the target layer.
         return DQN_training_step_decoupled_autoreg(
             policy_net=policy_net,
             target_net=target_net,
