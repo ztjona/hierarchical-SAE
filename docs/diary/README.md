@@ -24,6 +24,22 @@ which experiment uses it.
 
 ## Index
 
+### Per-series ledgers
+
+| Series | File | Topic |
+|---|---|---|
+| A | [series-A.md](series-A.md) | Replay / data / fine-tuning (combined_avg baseline) |
+| F & G | [series-FG.md](series-FG.md) | Adversarial sign flip, separate_bellman |
+| H–K | [series-HIJK.md](series-HIJK.md) | Terminal mask, unbound, final-only, coupled (joint pipeline) |
+| L | [series-L.md](series-L.md) | Monte Carlo Q_select target (joint pipeline) |
+| M | [series-M.md](series-M.md) | **Decoupled-autoregressive schema. Houses the current champion (ME_endgame(2)).** |
+| N | [series-N.md](series-N.md) | Shared-trunk diagnostics: dropout, asymmetric LR, freeze-place, balanced-select |
+| O | [series-O.md](series-O.md) | Unified 32-d aux variant of the M trunk (SAE substrate) |
+| P | [series-P.md](series-P.md) | Frozen-trunk select-head test (negative result, 2026-05) |
+| Q | [series-Q.md](series-Q.md) | Auxiliary legality + no inference mask (failed gate, 2026-05) |
+
+### Design notes
+
 | Date | Entry | Topic |
 |---|---|---|
 | 2026-05-08 | [unified-aux-trunk](2026-05-08_unified-aux-trunk.md) | 32-d phase-stable aux + `unified_autoreg` schema. Substrate of OA series. |

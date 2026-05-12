@@ -14,3 +14,13 @@ from .RL_functions import (
 from .contest import run_contest, contest_2_win_rate
 from .plotting import plot_contest_results, plot_loss, plot_grad_norm, plot_win_rate
 from .observers import plot_boards_comp, plot_Qv_progress, plot_Qv_horizon
+from .results_io import (
+    SUMMARY_SUFFIX,
+    append_record,
+    build_checkpoint_record,
+    build_final_record,
+    final_record,
+    load_pickle_results,
+    read_records,
+    write_records,
+)
