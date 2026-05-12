@@ -539,11 +539,17 @@ def write_summary_md(all_data, folders, results_dir, exp_filename, exp_display):
     exp_records = [r for r in records if not r["is_baseline"]]
     base_records = [r for r in records if r["is_baseline"]]
 
+    # Derive which parameter(s) were actually varied from the experiment runs
+    actual_param_names = list(dict.fromkeys(
+        r.get("param_name", PARAM_NAME) for r in exp_records
+    ))
+    param_varied_str = ", ".join(f"`{p}`" for p in actual_param_names) if actual_param_names else f"`{PARAM_NAME}`"
+
     lines = [
         f"# Summary — {exp_display}",
         "",
         f"Generated: {datetime.now():%Y-%m-%d %H:%M}",
-        f"Parameter varied: `{PARAM_NAME}`",
+        f"Parameter varied: {param_varied_str}",
         f"Runs: {len(exp_records)} (+ {len(base_records)} baselines)",
         "",
         "Final metrics = mean over the last 10% of epochs. `Peak` = max of the "
@@ -897,7 +903,7 @@ def main():
 
     fig_loss = plot_losses(all_data, folders)
     fig_gn = plot_grad_norms(all_data, folders) if PLOT_CONFIG.get("grad_norm") else None
-    fig_wr = plot_win_rates(all_data, folders)
+    fig_wr = plot_win_rates(all_data, folders) if PLOT_CONFIG.get("win_rate") else None
 
     # Save as PNG
     loss_path = results_dir / f"comparison_loss_{exp_filename}.png"
