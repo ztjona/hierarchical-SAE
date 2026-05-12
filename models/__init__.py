@@ -9,4 +9,10 @@ from .CNN_autoreg import (
     QuartoCNNAutoregUnifiedUnbound,
 )
 
+from .CNN_autoreg_sa import (
+    QuartoCNNAutoregUnifiedS1,
+    QuartoCNNAutoregUnifiedS2,
+    QuartoCNNAutoregUnifiedS4,
+)
+
 # from .CNN1 import QuartoCNN

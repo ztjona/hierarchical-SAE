@@ -20,6 +20,11 @@ from models.CNN_autoreg import (
     QuartoCNNAutoregUnified,
     QuartoCNNAutoregUnifiedUnbound,
 )
+from models.CNN_autoreg_sa import (
+    QuartoCNNAutoregUnifiedS1,
+    QuartoCNNAutoregUnifiedS2,
+    QuartoCNNAutoregUnifiedS4,
+)
 from QuartoRL import (
     gen_experience,
     run_contest,
@@ -31,6 +36,10 @@ from QuartoRL import (
     plot_boards_comp,
     plot_Qv_progress,
     plot_Qv_horizon,
+    SUMMARY_SUFFIX,
+    append_record,
+    build_checkpoint_record,
+    build_final_record,
 )
 from tqdm.auto import tqdm
 from pprint import pformat
@@ -47,6 +56,11 @@ logger.info("Imports done.")
 STARTING_NET = None  # Set to None to start with random weights
 EXPERIMENT_NAME = "OA_unifiedAux"
 CHECKPOINT_FOLDER = f"./CHECKPOINTS/{EXPERIMENT_NAME}/"
+# Series root = the experiment family (everything before the "(idx)MMDD_..." tag
+# appended by run_trains.py). JSONL summaries live alongside per-series notes
+# under ./results/<series>/ — CHECKPOINTS/ stays binary-only.
+SERIES_ROOT = EXPERIMENT_NAME.split("(", 1)[0] or EXPERIMENT_NAME
+RESULTS_FOLDER = f"./results/{SERIES_ROOT}/"
 # TRANSITION_SCHEMA options: "joint", "decoupled_autoreg", or "unified_autoreg"
 # Architecture, bot, and schema must be changed together:
 #   "joint"             → QuartoCNN / QuartoCNN_uncoupled / QuartoCNN_unbound  +  Quarto_bot
@@ -95,7 +109,7 @@ mode_2x2 = True
 EPOCHS = 5_000
 
 # number of last states to consider in the experience generation at the beginning of training
-N_LAST_STATES_INIT = 2  # Sweep variable for LA_mcSelect
+N_LAST_STATES_INIT = 4  # Constant N (no curriculum). N=4 supplies winner-select samples (see series-M.md).
 # number of last states to consider in the experience generation at the end of training. -1 means all states
 N_LAST_STATES_FINAL = N_LAST_STATES_INIT  # No curriculum, constant
 
@@ -105,7 +119,7 @@ NUM_EPOCHs_BUFFER = 8  # number of epochs to keep in the replay buffer, if GEN_E
 # Fraction of each training batch that comes from end-game-only experience (n_last_states=2).
 # This anchors the model on states it already knows, preventing catastrophic forgetting
 # during curriculum expansion. 0.0 disables the endgame buffer.
-ENDGAME_FRACTION = 0  # disabled for from-scratch training
+ENDGAME_FRACTION = 0.5  # ME(2) anchor recipe: 50% of each batch from N_LAST_STATES_ENDGAME-only experience
 N_LAST_STATES_ENDGAME = 2  # must match pre-trained model's training distribution
 
 # movs per match * #_matches per epoch (max 16, but avg less)
@@ -153,6 +167,14 @@ TAU = 0.01  # match Aa_replay(2)
 # TAU = 0.005
 GAMMA = 0.99
 
+# Per-head loss weights. Effective only for schemas that produce a (q_place, q_select)
+# pair of losses (decoupled_autoreg, unified_autoreg, and joint with
+# LOSS_APPROACH in {"separate_bellman", "mc_select"}). Combined loss is
+#   L = (ALPHA_PLACE * L_place + ALPHA_SELECT * L_select) / (ALPHA_PLACE + ALPHA_SELECT)
+# A (1.0, 1.0) ratio reproduces the historical `mean` aggregation.
+LOSS_ALPHA_PLACE = 1.0
+LOSS_ALPHA_SELECT = 1.0
+
 # ###########################
 # The bot at the end of each epoch will be evaluated against a limited number of rivals known as BASELINES.
 BASELINES = [
@@ -193,6 +215,9 @@ logger.info(
     f"ENDGAME_FRACTION={ENDGAME_FRACTION}, N_LAST_STATES_ENDGAME={N_LAST_STATES_ENDGAME}"
 )
 logger.info(f"LOSS_APPROACH={LOSS_APPROACH}")
+logger.info(
+    f"LOSS_ALPHA_PLACE={LOSS_ALPHA_PLACE}, LOSS_ALPHA_SELECT={LOSS_ALPHA_SELECT}"
+)
 logger.info(f"REWARD_FUNCTION={REWARD_FUNCTION}")
 logger.info(f"TRANSITION_SCHEMA={TRANSITION_SCHEMA}")
 logger.info(f"DECOUPLED_TARGET_STYLE={DECOUPLED_TARGET_STYLE}")
@@ -282,10 +307,14 @@ loss_fcn = nn.SmoothL1Loss()
 epochs_results = []  # to store the results of each epoch
 loss_data: dict[str, list[float | int]] = {
     "loss_values": [],
+    "loss_place_values": [],  # SmoothL1(q_place, target_place), unweighted (NaN if absent this step)
+    "loss_select_values": [],  # SmoothL1(q_select, target_select), unweighted (NaN if absent this step)
     "epoch_values": [],  # iter value at the end of each epoch
 }  # to track loss values during training
 grad_norm_data: dict[str, list[float | int]] = {
     "grad_norm_values": [],  # pre-clip total grad norm per training step
+    "grad_norm_fc2_place": [],  # post-backward L2 norm of fc2_place.* gradients (NaN if absent)
+    "grad_norm_fc2_select": [],  # post-backward L2 norm of fc2_select.* gradients (NaN if absent)
     "epoch_values": [],  # iter value at the end of each epoch (parallel to loss_data)
 }
 # ###########################
@@ -397,31 +426,70 @@ for e in tqdm(
         )
         if TRANSITION_SCHEMA in ("decoupled_autoreg", "unified_autoreg"):
             q_place, target_place, q_select, target_select = dqn_result  # type: ignore
-            active_losses: list[torch.Tensor] = []
-            if q_place.numel() > 0:
-                active_losses.append(loss_fcn(q_place, target_place))
-            if q_select.numel() > 0:
-                active_losses.append(loss_fcn(q_select, target_select))
-            if not active_losses:
+            L_place = (
+                loss_fcn(q_place, target_place)
+                if q_place.numel() > 0
+                else None
+            )
+            L_select = (
+                loss_fcn(q_select, target_select)
+                if q_select.numel() > 0
+                else None
+            )
+            if L_place is None and L_select is None:
                 raise ValueError(
                     "Per-phase batch produced no active place/select samples."
                 )
-            loss = torch.stack(active_losses).mean()
+            w_p = LOSS_ALPHA_PLACE if L_place is not None else 0.0
+            w_s = LOSS_ALPHA_SELECT if L_select is not None else 0.0
+            denom = w_p + w_s
+            term_p = w_p * L_place if L_place is not None else 0.0
+            term_s = w_s * L_select if L_select is not None else 0.0
+            loss = (term_p + term_s) / denom
         elif LOSS_APPROACH in ("separate_bellman", "mc_select"):
             # Per-head losses: separate_bellman → Bellman targets both heads;
             # mc_select → Bellman for Q_place, Monte Carlo return for Q_select.
             q_place, target_place, q_select, target_select = dqn_result  # type: ignore
+            L_place = loss_fcn(q_place, target_place)
+            L_select = loss_fcn(q_select, target_select)
+            denom = LOSS_ALPHA_PLACE + LOSS_ALPHA_SELECT
             loss = (
-                loss_fcn(q_place, target_place) + loss_fcn(q_select, target_select)
-            ) / 2
+                LOSS_ALPHA_PLACE * L_place + LOSS_ALPHA_SELECT * L_select
+            ) / denom
         else:
             state_action_values, expected_state_action_values = dqn_result  # type: ignore
             loss = loss_fcn(state_action_values, expected_state_action_values)
+            L_place = None
+            L_select = None
         loss_data["loss_values"].append(loss.item())
+        loss_data["loss_place_values"].append(
+            float(L_place.item()) if L_place is not None else float("nan")
+        )
+        loss_data["loss_select_values"].append(
+            float(L_select.item()) if L_select is not None else float("nan")
+        )
 
         # Optimize the model
         optimizer.zero_grad()
         loss.backward()
+
+        # Per-head grad norm diagnostic: L2 norm restricted to fc2_place.* and
+        # fc2_select.* parameters. Reflects gradient flow into each head and is
+        # the cheap proxy for "is the select head learning?". Computed pre-clip.
+        def _head_grad_norm(prefix: str) -> float:
+            sq = 0.0
+            any_grad = False
+            for name, p in policy_net.named_parameters():
+                if not name.startswith(prefix):
+                    continue
+                if p.grad is None:
+                    continue
+                any_grad = True
+                sq += float(p.grad.detach().pow(2).sum().item())
+            return float(sq**0.5) if any_grad else float("nan")
+
+        grad_norm_data["grad_norm_fc2_place"].append(_head_grad_norm("fc2_place"))
+        grad_norm_data["grad_norm_fc2_select"].append(_head_grad_norm("fc2_select"))
 
         # Optimization: grad clipping and optimization step
         # this is not strictly mandatory but it's good practice to keep
@@ -540,6 +608,62 @@ for e in tqdm(
                 },
                 f,
             )
+
+        # JSONL summary: append one checkpoint record per save, plus a final
+        # record on the last save of the run. Lives under
+        # ./results/<series>/ — CHECKPOINTS/ stays binary-only.
+        jsonl_path = path.join(
+            RESULTS_FOLDER, f"{EXPERIMENT_NAME}{SUMMARY_SUFFIX}"
+        )
+        ckpt_rec = build_checkpoint_record(
+            epoch=e + 1,
+            loss_data=loss_data,
+            grad_norm_data=grad_norm_data,
+            win_rate=win_rate,
+            q_values_history=q_values_history,
+        )
+        append_record(jsonl_path, ckpt_rec)
+
+        if (e + 1) == EPOCHS:
+            config_snapshot = {
+                "EXPERIMENT_NAME": EXPERIMENT_NAME,
+                "STARTING_NET": STARTING_NET,
+                "ARCHITECTURE": policy_net.name,
+                "TRANSITION_SCHEMA": TRANSITION_SCHEMA,
+                "DECOUPLED_TARGET_STYLE": DECOUPLED_TARGET_STYLE,
+                "LOSS_APPROACH": LOSS_APPROACH,
+                "REWARD_FUNCTION": REWARD_FUNCTION,
+                "LOSS_ALPHA_PLACE": LOSS_ALPHA_PLACE,
+                "LOSS_ALPHA_SELECT": LOSS_ALPHA_SELECT,
+                "BATCH_SIZE": BATCH_SIZE,
+                "EPOCHS": EPOCHS,
+                "LR": LR,
+                "LR_F": LR_F,
+                "TAU": TAU,
+                "GAMMA": GAMMA,
+                "MAX_GRAD_NORM": MAX_GRAD_NORM,
+                "MATCHES_PER_EPOCH": MATCHES_PER_EPOCH,
+                "NUM_EPOCHs_BUFFER": NUM_EPOCHs_BUFFER,
+                "N_LAST_STATES_INIT": N_LAST_STATES_INIT,
+                "N_LAST_STATES_FINAL": N_LAST_STATES_FINAL,
+                "N_LAST_STATES_ENDGAME": N_LAST_STATES_ENDGAME,
+                "ENDGAME_FRACTION": ENDGAME_FRACTION,
+                "TEMPERATURE_EXPLORE": TEMPERATURE_EXPLORE,
+                "TEMPERATURE_EXPLOIT": TEMPERATURE_EXPLOIT,
+                "TARGET_UPDATE_FREQ": TARGET_UPDATE_FREQ,
+                "GEN_EXPERIENCE_BY_EPOCH": GEN_EXPERIENCE_BY_EPOCH,
+                "mode_2x2": mode_2x2,
+            }
+            final_rec = build_final_record(
+                exp_name=EXPERIMENT_NAME,
+                epochs=EPOCHS,
+                config=config_snapshot,
+                loss_data=loss_data,
+                grad_norm_data=grad_norm_data,
+                win_rate=win_rate,
+                q_values_history=q_values_history,
+            )
+            append_record(jsonl_path, final_rec)
 
     # ------- PLOT RESULTS -----------
     if (e + 1) % FREQ_EPOCH_PLOT_SHOW == 0 or (e + 1) == EPOCHS:

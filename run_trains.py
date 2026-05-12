@@ -73,6 +73,32 @@ EXPERIMENT_NAME = "" # defined by CLI
 PARAM_ITERATE = "N_LAST_STATES_INIT"
 PARAMS = [2, 3, 4, 12]
 
+# ----------------------------------------------------------------------
+# Multi-param sweep mode (used when a single sweep needs to set more than
+# one trainRL.py variable per variant — e.g. Ra_lossWeight sweeps both
+# LOSS_ALPHA_PLACE and LOSS_ALPHA_SELECT). Leave at None to use the
+# single-param mode above.
+#
+# Each item is a dict ``{param_name: value, ...}``. The variant suffix is
+# built from the dict; you can override it via ``"_label": "ALPHA_1.0_3.0"``.
+# When MULTI_PARAMS is set, PARAM_ITERATE / PARAMS are ignored.
+#
+# Example: Ra_lossWeight sweep — α grid over (place, select).
+# MULTI_PARAMS = [
+#     {"LOSS_ALPHA_PLACE": 1.0, "LOSS_ALPHA_SELECT": 1.0, "_label": "ALPHA_1.0_1.0"},
+#     {"LOSS_ALPHA_PLACE": 1.0, "LOSS_ALPHA_SELECT": 3.0, "_label": "ALPHA_1.0_3.0"},
+#     {"LOSS_ALPHA_PLACE": 0.3, "LOSS_ALPHA_SELECT": 1.0, "_label": "ALPHA_0.3_1.0"},
+#     {"LOSS_ALPHA_PLACE": 0.1, "LOSS_ALPHA_SELECT": 1.0, "_label": "ALPHA_0.1_1.0"},
+# ]
+# Example: Sa_archScan sweep — ARCHITECTURE class (no quotes — the value is
+# substituted verbatim, so the class must already be importable in trainRL.py).
+# MULTI_PARAMS = [
+#     {"ARCHITECTURE": "QuartoCNNAutoregUnifiedS1", "_label": "ARCH_S1_deepConv"},
+#     {"ARCHITECTURE": "QuartoCNNAutoregUnifiedS2", "_label": "ARCH_S2_wideFC"},
+#     {"ARCHITECTURE": "QuartoCNNAutoregUnifiedS4", "_label": "ARCH_S4_uniform512"},
+# ]
+MULTI_PARAMS = None
+
 # Path to the original training script
 TRAIN_SCRIPT = "trainRL.py"
 OUTPUT_DIR = "train_scripts/"
@@ -102,19 +128,25 @@ def modify_param_in_file(file_path, param_name, param_value):
     return modified_content
 
 
-def create_training_file(param_value, experiment_name):
-    """Create training script with modified parameter.
+def create_training_file(param_pairs, experiment_name):
+    """Create training script with one or more modified parameters.
 
     Args:
-        param_value: Value to set for the parameter
+        param_pairs: iterable of (name, value) tuples to substitute into
+            trainRL.py. Values are written verbatim (no quoting), matching
+            the existing behaviour for numeric and bare-identifier values.
         experiment_name: The name of the experiment, used for the filename.
     """
     print("=" * 80)
-    print(f"Creating training file for {PARAM_ITERATE} = {param_value}")
+    print(f"Creating training file: {experiment_name}")
+    for name, value in param_pairs:
+        print(f"  {name} = {value}")
     print("=" * 80)
 
-    # Read and modify the training script
-    modified_content = modify_param_in_file(TRAIN_SCRIPT, PARAM_ITERATE, param_value)
+    with open(TRAIN_SCRIPT, "r", encoding="utf-8") as f:
+        modified_content = f.read()
+    for name, value in param_pairs:
+        modified_content = modify_param_in_file_text(modified_content, name, value)
 
     exp_pattern = r'^EXPERIMENT_NAME\s*=\s*"([^"]+)"'
     exp_replacement = f'EXPERIMENT_NAME = "{experiment_name}"'
@@ -122,16 +154,36 @@ def create_training_file(param_value, experiment_name):
         exp_pattern, exp_replacement, modified_content, flags=re.MULTILINE
     )
 
-    # Create training script file
     output_script_name = f"{experiment_name}.py"
     output_path = path.join(OUTPUT_DIR, output_script_name)
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(modified_content)
 
-    print(f"Created: {output_path}")
-    print(f"  - {PARAM_ITERATE} = {param_value}")
-    print(f"  - EXPERIMENT_NAME = {experiment_name}")
-    print("=" * 80 + "\n")
+    print(f"Created: {output_path}\n")
+
+
+def modify_param_in_file_text(content, param_name, param_value):
+    pattern = rf"^{param_name}\s*=\s*.*$"
+    replacement = f"{param_name} = {param_value}"
+    return re.sub(pattern, replacement, content, flags=re.MULTILINE)
+
+
+def _build_variants():
+    """Return list of (idx, label, [(name, value), ...]) for the configured sweep."""
+    if MULTI_PARAMS:
+        out = []
+        for idx, spec in enumerate(MULTI_PARAMS, 1):
+            spec = dict(spec)
+            label = spec.pop("_label", None)
+            pairs = list(spec.items())
+            if label is None:
+                label = "_".join(f"{k}_{v}" for k, v in pairs)
+            out.append((idx, label, pairs))
+        return out
+    return [
+        (idx, f"{PARAM_ITERATE}_{v}", [(PARAM_ITERATE, v)])
+        for idx, v in enumerate(PARAMS, 1)
+    ]
 
 
 def main():
@@ -143,32 +195,34 @@ def main():
     print(f"\n{'=' * 80}")
     print(f"CREATING TRAINING FILES")
     print(f"EXPERIMENT: {EXPERIMENT_NAME}")
-    print(f"Parameter to iterate: {PARAM_ITERATE}")
-    print(f"Values: {PARAMS}")
+    if MULTI_PARAMS:
+        print(f"Multi-param sweep: {len(MULTI_PARAMS)} variants")
+    else:
+        print(f"Parameter to iterate: {PARAM_ITERATE}")
+        print(f"Values: {PARAMS}")
     print(f"{'=' * 80}\n")
 
     created_files = []
     run_commands = []
 
-    for idx, param_value in enumerate(PARAMS, 1):
+    variants = _build_variants()
+    for idx, label, pairs in variants:
         run_id = f"({idx:1d}){datetime.now():%m%d}"
-        exp_variant_name = f"{EXPERIMENT_NAME}{run_id}_{PARAM_ITERATE}_{param_value}"
+        exp_variant_name = f"{EXPERIMENT_NAME}{run_id}_{label}"
 
-        print(
-            f"[{idx}/{len(PARAMS)}] Creating file for {PARAM_ITERATE} = {param_value}"
-        )
+        print(f"[{idx}/{len(variants)}] {label}")
 
         try:
-            create_training_file(param_value, exp_variant_name)
+            create_training_file(pairs, exp_variant_name)
             script_path = path.join(OUTPUT_DIR, f"{exp_variant_name}.py")
             created_files.append(script_path)
 
-            if idx == len(PARAMS):
+            if idx == len(variants):
                 run_commands.append(f'./runpy.sh "{script_path}"')
             else:
                 run_commands.append(f'./runpy.sh --no_echo "{script_path}" &')
         except Exception as e:
-            print(f"Failed to create file for {param_value}: {e}")
+            print(f"Failed to create file for {label}: {e}")
 
     print(f"\n{'=' * 80}")
     print("FILE CREATION COMPLETED")
