@@ -266,6 +266,19 @@ def extract_trailing_numeric_value(folder_name):
     return None
 
 
+def extract_run_index(folder_name):
+    """Extract the run index N from the (N) part of a folder name.
+
+    Examples:
+      Pa_frozenTrunkSelect(1)0511 -> 1
+      QC_unifiedNoMask(3)0512    -> 3
+    """
+    match = re.search(r"\((\d+)\)", folder_name)
+    if match:
+        return float(match.group(1))
+    return None
+
+
 def numeric_value_matches(value, candidates, atol=1e-12, rtol=1e-9):
     """Return True if value matches any candidate using numeric tolerance."""
     for candidate in candidates:
@@ -292,22 +305,32 @@ def find_experiment_folders(base_path, experiment_names):
 
     folders = []
 
-    # Search for each experiment pattern
+    # Search for each experiment pattern (case-insensitive on Linux)
     for exp_name in experiment_names:
-        pattern = f"{exp_name}*"
-        for folder in checkpoint_path.glob(pattern):
-            if folder.is_dir():
-                param_value = extract_param_value(folder.name)
-                if param_value is not None:
-                    folders.append(
-                        {
-                            "path": folder,
-                            "name": folder.name,
-                            "param_value": param_value,
-                            "experiment": exp_name,
-                            "is_baseline": False,
-                        }
-                    )
+        exp_name_lower = exp_name.lower()
+        for folder in checkpoint_path.iterdir():
+            if not folder.is_dir():
+                continue
+            if not folder.name.lower().startswith(exp_name_lower):
+                continue
+            param_value = extract_param_value(folder.name)
+            param_name = PARAM_NAME
+            if param_value is None:
+                param_value = extract_trailing_numeric_value(folder.name)
+            if param_value is None:
+                param_value = extract_run_index(folder.name)
+                param_name = "run"
+            if param_value is not None:
+                folders.append(
+                    {
+                        "path": folder,
+                        "name": folder.name,
+                        "param_value": param_value,
+                        "param_name": param_name,
+                        "experiment": exp_name,
+                        "is_baseline": False,
+                    }
+                )
 
     # Sort by parameter value
     folders.sort(key=lambda x: x["param_value"])
@@ -843,8 +866,9 @@ def main():
         exp_tag = (
             f" [{folder.get('experiment', 'unknown')}]" if len(exp_names) > 1 else ""
         )
+        label_p = folder.get("param_name", PARAM_NAME)
         print(
-            f"  - {folder['name']}{exp_tag} ({PARAM_NAME}={format_param_value(folder['param_value'])})"
+            f"  - {folder['name']}{exp_tag} ({label_p}={format_param_value(folder['param_value'])})"
         )
 
     baseline_folders = load_baseline_experiments(CHECKPOINT_BASE, BASELINEs)
