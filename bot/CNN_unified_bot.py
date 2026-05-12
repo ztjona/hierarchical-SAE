@@ -9,7 +9,7 @@ methods are identical; the only difference is that this bot constructs a
 forward pass, regardless of phase. The trunk of ``QuartoCNNAutoregUnified``
 is phase-agnostic — phase only routes which output head is read.
 
-See ``decoupled_autoreg_design.md`` → "Unified-Aux variant".
+See ``docs/diary/2026-05-08_unified-aux-trunk.md``.
 """
 
 """

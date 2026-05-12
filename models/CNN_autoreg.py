@@ -343,8 +343,8 @@ class QuartoCNNAutoregSepTrunks(NN_abstract):
 # The trunk is phase-agnostic: aux is a 32-d vector carrying both the offered
 # piece (one-hot, first 16 dims) and the available-piece mask (next 16 dims) at
 # every step, regardless of phase. Phase only routes which output head is read
-# downstream, never modulates the trunk. See decoupled_autoreg_design.md →
-# "Unified-Aux variant".
+# downstream, never modulates the trunk. See
+# docs/diary/2026-05-08_unified-aux-trunk.md.
 
 
 class _QuartoCNNAutoregUnifiedBase(NN_abstract):

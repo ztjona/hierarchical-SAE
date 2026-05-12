@@ -15,7 +15,7 @@ Experiments use a two-part name: **`XY_description`**
   - `L`: Monte Carlo return target on Q_select in the joint pipeline (LA_mcSelect, LB_mcSelect)
   - `M`: decoupled-autoregressive transition schema (`QuartoCNNAutoreg` + `Quarto_autoreg_bot`) with `td_place_mc_select` targets — TD/Bellman on Q_place, Monte Carlo on Q_select. First sweep `MA_tempRegresive` was mis-named (should have been `MA_*`); subsequent sweeps follow the convention (`MB_final`, ...).
   - `N`: shared-trunk diagnostics on the M-series autoreg model (`NA_dropout` low-dropout trunk, `NB_asymLR` 10× LR on `fc2_select`).
-  - `O`: unified-aux variant of the decoupled-autoreg trunk (`QuartoCNNAutoregUnified` + `Quarto_unified_bot`). Targets unchanged (`td_place_mc_select`); only the input changes — `state_aux` is a 32-d phase-stable `[offered_one_hot ; available_mask]` and the phase embedding is removed. Designed for a unified interpretability pipeline across Quarto / Othello / 4×4 tic-tac-toe. See `decoupled_autoreg_design.md` → "Unified-Aux variant".
+  - `O`: unified-aux variant of the decoupled-autoreg trunk (`QuartoCNNAutoregUnified` + `Quarto_unified_bot`). Targets unchanged (`td_place_mc_select`); only the input changes — `state_aux` is a 32-d phase-stable `[offered_one_hot ; available_mask]` and the phase embedding is removed. Designed for a unified interpretability pipeline across Quarto / Othello / 4×4 tic-tac-toe. See [`docs/diary/2026-05-08_unified-aux-trunk.md`](docs/diary/2026-05-08_unified-aux-trunk.md).
 - **Second letter (Y)** — Hyperparameter sweep within the same code version:
   - `a`, `b`, `c`, ... for successive sweeps (e.g., Aa_replay, Ab_data, Ac_fine)
 
@@ -1000,7 +1000,7 @@ winner_select_buffer.extend(winner_select_exp)
 
 **Hypothesis:** The two-mode `state_aux` (one-hot offered piece during place / available-piece mask during select) is unnecessary. A single phase-stable 32-d aux `[offered_one_hot ; available_pieces_mask]` carries all relevant context at every step, lets the trunk be phase-agnostic (no phase embedding), and pumps a single distribution through every hooked layer. **Targets are unchanged** (TD on place, MC on select); only the input semantics change. The conjecture is that the matched-WR run will be cleanly comparable to MB/ME and produce a single, pool-able activation distribution suitable for one SAE per layer — eliminating the per-phase split that decoupled-autoreg would force on `games-interp`.
 
-**Design rationale:** see `decoupled_autoreg_design.md` → "Unified-Aux variant".
+**Design rationale:** see [`docs/diary/2026-05-08_unified-aux-trunk.md`](docs/diary/2026-05-08_unified-aux-trunk.md).
 
 **Code change from M (added 2026-05-08, additive — no existing class touched):**
 
@@ -1024,3 +1024,76 @@ winner_select_buffer.extend(winner_select_exp)
 - If OA WR ≥ MB WR within 3pp at every N → the unified-aux trunk is the new interp target. Proceed to a place-only `games-interp` adapter on the OA(1) checkpoint.
 - If OA WR loses ≥5pp at any N → the input redesign costs something; either keep the phase embedding (cheap variant) or fall back to ME(2) for interp work.
 - Independent of WR, also check the Q_select Outcome=+1 panel: any improvement here would corroborate the schema-bug hypothesis from the open problem above (winner-side select samples may be reaching the loss with cleaner labels through unified aux than they did through the phase-conditional schema).
+
+## Pa_frozenTrunkSelect — Full Trunk Freeze, fc2_select Only (PLANNED)
+
+**Hypothesis:** Q_select saturation is a *head*-level problem, not a representational one. The ME(2) trunk already encodes everything needed to ground select Q-values — it just learned the wrong head mapping under the joint loss. If we freeze the entire trunk (conv1, conv2, fc1, fc_in_aux, fc2_place) at ME(2)_E_5000 and train ONLY `fc2_select` with `td_place_mc_select` targets at the same data regime that produced ME(2) (N=3, `ENDGAME_FRACTION=0.5`), the select head should escape −1 saturation without losing the place-head competence that powers the 73% WR. This is the cheapest possible test of "head vs trunk" as the locus of the saturation pathology.
+
+This is also the inverse of `Ne_freezePlace` (which froze the place head): together the two experiments triangulate whether the open problem lives in the representation (both should fail), the joint optimization (both should succeed), or one specific head (asymmetric outcomes).
+
+**Code change:** new train script `train_scripts/Pa_frozenTrunkSelect(1)0511.py`. Loads `ME_endgame(2)_E_5000.pt` into a `QuartoCNNAutoreg`, sets `requires_grad=False` on all parameters, then re-enables exactly `fc2_select.weight` and `fc2_select.bias`; the optimizer only receives trainable parameters. A sanity assertion verifies that the set of trainable parameter names equals `{"fc2_select.weight", "fc2_select.bias"}` — anything else raises before training starts. Schema, target style, data recipe (`ENDGAME_FRACTION=0.5`, `N_LAST_STATES_INIT=N_LAST_STATES_FINAL=3`, `N_LAST_STATES_ENDGAME=2`), and hyperparameters (`LR=7e-4`, `TAU=0.01`, `BATCH_SIZE=32`, `MATCHES_PER_EPOCH=32`, `NUM_EPOCHs_BUFFER=8`, `EPOCHS=1000`) all mirror ME(2).
+
+**Fixed:** `STARTING_NET=ME_endgame(2)_E_5000.pt`, `ARCHITECTURE=QuartoCNNAutoreg`, `TRANSITION_SCHEMA="decoupled_autoreg"`, `DECOUPLED_TARGET_STYLE="td_place_mc_select"`, `REWARD_FUNCTION="final"`, all trunk + `fc2_place` parameters frozen.
+
+| Run | N_LAST_STATES | Epochs | Trainable params |
+|-----|---------------|--------|------------------|
+| Pa_frozenTrunkSelect(1) | 3 | 1000 | `fc2_select.weight`, `fc2_select.bias` only |
+
+**Decision gate:**
+- Q_select mean of winners (`Outcome=+1`) increases by ≥ 0.40 over the run, AND
+- WR vs `bot_random` ≥ 90%, AND
+- WR vs `ME_endgame(2)_E_5000` ≥ 45% (not catastrophically worse than the starting checkpoint).
+
+Combinations:
+- All three pass → head-level bug confirmed; the trunk was fine all along. Next step: same recipe with `Ne_freezePlace` for direct triangulation.
+- Q_select recovers but WR collapses → head retraining destabilises the rest of the policy; need joint LR asymmetry instead.
+- Q_select stays at −1 → representational problem, not head problem. Move on to the QC architecture (already designed) without further freeze experiments.
+
+## QC_unifiedNoMask — New Architecture, Q-series Start
+
+**Hypothesis (WR-first, with a substrate fix):** The M/N/O series have plateaued near 66–73% WR while sharing a structural defect that the `games-interp` audit on `AA(2)` made concrete:
+
+(Full design notes: [`docs/diary/2026-05-11_qc-no-mask.md`](docs/diary/2026-05-11_qc-no-mask.md).)
+
+1. The network does **not** learn cell-legality (`games-interp` Test D Q-gap = −0.47 mean; legality is enforced entirely by the bot's inference-time validity filter).
+2. `fc1` destroys the threat features that `conv2` still carries (LP F1 collapses 0.50 → 0.02 across the fc1 bottleneck).
+
+QC targets both of those simultaneously without changing the RL algorithm:
+
+- **Auxiliary legality head** `fc_aux_legality: Linear(n_neurons, 16)` trained with `BCEWithLogits(logits, is_empty(cell))`, supervised every batch from `state_board`. λ_legality = 0.05 starting point. This forces `fc1` to preserve per-cell legality information explicitly, instead of relying on the inference mask.
+- **Wider `fc1` (128 → 256).** Cheap capacity check on the bottleneck where threats are getting lost.
+- **No inference legality mask.** The paired `Quarto_unified_nomask_bot` picks `argmax(Q_place)` directly. If the top-ranked cell is invalid the bot falls back to the next valid rank so training can complete, and records `invalid_argmax_rate` as the legality-learning metric. The success criterion is that this rate → 0 over training, *not* zero from epoch 1.
+- **Unified 32-d phase-stable aux + no phase embedding.** Inherited from OA. Single activation distribution per layer for SAE work.
+
+QC starts the **Q-series** (per `Experiment Naming Convention`, a new code-version letter is mandated by the new architecture class, new bot class, and new auxiliary loss term).
+
+**Code change (additive — no existing class touched):**
+
+- `models/CNN_unified_nomask.py`: new class `QuartoCNNUnifiedNoMask` with `forward(x_board, x_aux, phase=...)` → `(q_place, q_select)`, `forward_with_aux(...)` → `(q_place, q_select, legality_logits)`, plus the helper `legality_target_from_board(x_board) -> (B, 16)`.
+- `bot/CNN_unified_nomask_bot.py`: subclasses `Quarto_unified_bot` and overrides `_choose_board_position` to pick `argmax(Q_place)` without validity filtering; exposes `invalid_argmax_rate()` and `reset_legality_counters()`.
+- `train_scripts/QC_unifiedNoMask(1)0511.py`: from-scratch training, ME(2) recipe (N=2→4 curriculum, `ENDGAME_FRACTION=0.5`, `N_LAST_STATES_ENDGAME=2`, `EPOCHS=5000`, `LR=7e-4`, `TAU=0.01`). After every `DQN_training_step` call the loop additionally computes `legality_loss = BCEWithLogits(policy_net.legality_logits(state_board, state_aux), legality_target_from_board(state_board))` and minimises `L = L_DQN + λ_legality · L_legality` with a single `backward()`.
+- `tests/test_qc_unified_nomask.py`: 14 pytest cases covering the legality-target helper (empty / half-full / row-major / bad-shape), `forward` shapes and tanh range, `forward_with_aux` three-tuple, `legality_logits` shape, aux-dim validation, numpy input acceptance, state-dict round-trip, `q_values_phase` routing, and `name` property. All pass as of 2026-05-11.
+
+**Fixed:** `ARCHITECTURE=QuartoCNNUnifiedNoMask`, `BOT=Quarto_unified_nomask_bot`, `TRANSITION_SCHEMA="unified_autoreg"`, `DECOUPLED_TARGET_STYLE="td_place_mc_select"`, `REWARD_FUNCTION="final"`, `STARTING_NET=None`, `λ_legality=0.05`.
+
+| Run | ENDGAME_FRACTION | Epochs |
+|-----|-------------------|--------|
+| QC_unifiedNoMask(1) | 0.5 | 5000 |
+
+**Compare to:** `ME_endgame(2)_E_5000` (current champion, 73% WR vs `bot_loss-BT`), `OA_unifiedAux(1)` (66.3% at N=2, matched MB), `bot_random`.
+
+**Decision gate (pre-registered):**
+- **WR vs `bot_random` ≥ 95%** (hard requirement — anything weaker means the new architecture failed to learn the game).
+- **WR vs `ME_endgame(2)_E_5000` ≥ 50%** (non-regression on the WR-first criterion).
+- **`invalid_argmax_rate` < 0.05 averaged over the last 100 epochs** (legality has been learned, not masked).
+- **Optional, deferred to `games-interp`:** Test D Q-gap (`Q(empty) − Q(occupied)`) ≥ +0.3 on `QC_unifiedNoMask(1)_E_5000`. Confirms the legality concept landed in the Q values, not just the auxiliary head.
+
+Combinations:
+- All four pass → QC is the new champion AND the new SAE substrate. Q2 is then the platform on which Q3 (selection-reward shaping) and Q4 (extended N curriculum / larger endgame buffer) build.
+- WR passes but `invalid_argmax_rate` stays high → the aux head learned legality in isolation (gradient through `fc_aux_legality`) but `fc1` is still legality-blind in the Q heads. Increase λ_legality, or freeze `fc_aux_legality` and back-propagate only the BCE through `fc1`.
+- WR vs ME(2) < 50% → the architecture change cost performance; do NOT proceed to Q3/Q4 from QC. Diagnose whether the wider `fc1` or the absent mask is the regression driver before iterating.
+
+**Q-series roadmap (forward references, not yet started):**
+
+- **Q3 — selection-reward shaping.** From QC(1), add intermediate signal on `Q_select` (e.g. `+0.1` for offering a piece that cannot complete a line on the opponent's turn, `−0.1` otherwise). Tests whether dense select feedback can shake the head off saturation that the trunk fix alone failed to address.
+- **Q4 — extended N curriculum.** From QC(1), push `N_LAST_STATES_FINAL` to 6 or 8 with a larger endgame buffer. Tests whether more horizon, on the legality-aware substrate, finally produces a bot competent at mid-game offensive play.

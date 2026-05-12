@@ -6,6 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **`readme.md`** — project overview, two-headed CNN architecture, experience tuple schema, reward functions, loss approaches, training loop, quick-start commands, project layout. **Read this first.**
 - **`Research-status.md`** — every experiment, its hypothesis, fixed params, result, and post-mortem; the "Key Takeaways" and "Current Open Problem" sections are the source of truth for what has already been tried and why it failed. **Consult before proposing new experiments or interpreting results.**
+- **`docs/diary/`** — long-form architecture and design notes (new schemas, new model classes, new auxiliary losses). Start at `docs/diary/README.md` for the index, then read only the entry whose topic is relevant. **Consult before modifying a `TRANSITION_SCHEMA`, model class, or bot inference rule.**
 
 Do not restate content from those files here — link to the relevant section instead.
 
@@ -20,7 +21,7 @@ These are non-obvious contracts that span files or that have already bitten us. 
 - **Place and select are independent action spaces.** Take `max` over each head independently, never over averaged logits (this was the correct half of commit `51b59ba`).
 - **`mode_2x2=True` is the default across training and evaluation.** Keep it consistent — a bot trained with 2×2 wins against a no-2×2 baseline isn't a valid comparison.
 - **Pickled results may contain CUDA tensors.** Use the `CPUUnpickler` pattern in `tools/view_qv.py` when loading `CHECKPOINTS/<exp>/<exp>.pkl` on a CPU-only machine.
-- **`TRANSITION_SCHEMA` is a triplet contract** (schema name × model class × bot class). The three valid combinations are documented at the top of `trainRL.py`. `joint` uses `QuartoCNN*` + `Quarto_bot`; `decoupled_autoreg` uses `QuartoCNNAutoreg*` + `Quarto_autoreg_bot`; `unified_autoreg` uses `QuartoCNNAutoregUnified*` + `Quarto_unified_bot`. Mixing a model from one row with a bot/schema from another will silently produce wrong aux semantics — no exception, just bad gradients. The `unified_autoreg` schema reuses the `DQN_training_step_decoupled_autoreg` target machinery, so target rules (`DECOUPLED_TARGET_STYLE`) apply to both autoreg schemas.
+- **`TRANSITION_SCHEMA` is a triplet contract** (schema name × model class × bot class). The valid combinations are documented at the top of `trainRL.py`. `joint` uses `QuartoCNN*` + `Quarto_bot`; `decoupled_autoreg` uses `QuartoCNNAutoreg*` + `Quarto_autoreg_bot`; `unified_autoreg` uses either (`QuartoCNNAutoregUnified*` + `Quarto_unified_bot`) for the OA-series mask-enabled inference, OR (`QuartoCNNUnifiedNoMask` + `Quarto_unified_nomask_bot`) for the QC-series no-mask inference + aux legality head. Mixing a model from one row with a bot/schema from another will silently produce wrong aux semantics — no exception, just bad gradients. The `unified_autoreg` schema reuses the `DQN_training_step_decoupled_autoreg` target machinery, so target rules (`DECOUPLED_TARGET_STYLE`) apply to all autoreg schemas. The QC training loop additionally computes a per-batch `BCEWithLogits` legality loss via `policy_net.legality_logits(state_board, state_aux)` against `legality_target_from_board(state_board)` and adds `λ_legality · L_legality` to `L_DQN` before `backward()`.
 
 ## Adding a new experiment
 
