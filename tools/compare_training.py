@@ -204,7 +204,11 @@ def format_param_value(value):
     - Values >= 1: show as integers or decimals (4, 8, 12, 16)
     - Values < 0.001: scientific notation (5e-04, 1e-03)
     - Values 0.001-1: decimal notation (0.001, 0.5)
+    - Strings: return as is
     """
+    if isinstance(value, str):
+        return value
+    
     if value >= 1:
         # Show as integer if it's a whole number, otherwise 1 decimal
         if value == int(value):
@@ -222,11 +226,15 @@ def format_param_value(value):
 def extract_param_value(folder_name):
     """Extract parameter value from folder name based on PARAM_NAME."""
     # Pattern: Experiment(X)MMDD_PARAM_NAME_VALUE
-    # Examples: "LR_1e-5", "N_LAST_STATES_INIT_8", "BATCH_SIZE_32"
-    pattern = rf"{PARAM_NAME}_([0-9.e-]+)"
+    # Examples: "LR_1e-5", "N_LAST_STATES_INIT_8", "BATCH_SIZE_32", "ARCH_S1_deepConv"
+    pattern = rf"{PARAM_NAME}_(.+)$"
     match = re.search(pattern, folder_name)
     if match:
-        return float(match.group(1))
+        val_str = match.group(1)
+        try:
+            return float(val_str)
+        except ValueError:
+            return val_str
 
     # Fallback to LR_ pattern for old experiments
     match = re.search(r"LR_([0-9.e-]+)", folder_name)
@@ -248,8 +256,29 @@ def extract_param_name_from_folder(folder_name):
     match = re.match(r".*?\)\d{4}_(.+)_[0-9.e-]+$", folder_name, re.IGNORECASE)
     if match:
         return match.group(1)
+        
+    # Generic fallback: just extract everything after date, split by first _
+    match = re.match(r".*?\)\d{4}_(.+)$", folder_name, re.IGNORECASE)
+    if match:
+        tag = match.group(1)
+        if "_" in tag:
+            return tag.split("_", 1)[0]
+        return "Sweep"
     return None
 
+def extract_fallback_value(folder_name):
+    # Match everything after )\d{4}_
+    match = re.match(r".*?\)\d{4}_(.+)$", folder_name)
+    if not match:
+        return None
+    tag = match.group(1)
+    if "_" in tag:
+        val_str = tag.split("_", 1)[1]
+        try:
+            return float(val_str)
+        except ValueError:
+            return val_str
+    return tag
 
 def extract_trailing_numeric_value(folder_name):
     """Extract the trailing numeric token from a folder name.
@@ -317,6 +346,11 @@ def find_experiment_folders(base_path, experiment_names):
             param_name = PARAM_NAME
             if param_value is None:
                 param_value = extract_trailing_numeric_value(folder.name)
+                real_param_name = extract_param_name_from_folder(folder.name)
+                if real_param_name:
+                    param_name = real_param_name
+            if param_value is None:
+                param_value = extract_fallback_value(folder.name)
             if param_value is None:
                 param_value = extract_run_index(folder.name)
                 param_name = "run"
