@@ -81,6 +81,7 @@ BASELINEs = [
     {"JA_final": [3]},
     {"LA_mcSelect": [2, 3]},
     {"MA_tempRegresive": [2, 4]},
+    {"ME_endgame": [0.5]},
 ]
 # BASELINEs = []  # Disable baselines
 
