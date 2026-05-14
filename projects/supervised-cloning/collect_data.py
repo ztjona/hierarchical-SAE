@@ -20,8 +20,8 @@ Options:
     -g <int>, --games <int>         Total games to play  [default: 500]
     -d <int>, --depth <int>         Teacher MinimaxBot search depth  [default: 2]
     --opponent-mix <spec>           Comma-separated name:fraction pairs.
-                                    Supported names: random, minimax_d1, minimax_d2, minimax_d3.
-                                    Fractions are auto-normalised.
+                                    Supported names: random, minimax_d1, minimax_d2,
+                                    minimax_d3, loss_BT.  Fractions are auto-normalised.
                                     [default: random:0.3,minimax_d1:0.3,minimax_d2:0.4]
     --no-mode-2x2                   Disable 2x2 win condition (default: enabled).
     --seed <int>                    Random seed  [default: 42]
@@ -59,6 +59,14 @@ from docopt import docopt  # noqa: E402 (after path setup)
 from quartopy import QuartoGame, Piece  # noqa: E402
 from bot.minimax_bot import MinimaxBot  # noqa: E402
 from bot.random_bot import Quarto_bot as RandomBot  # noqa: E402
+from bot.CNN_bot import Quarto_bot as CNNBot  # noqa: E402
+from models.CNN_uncoupled import QuartoCNN as QuartoCNN_uncoupled  # noqa: E402
+
+# Path to the strong loss-BT CNN baseline (shared with clone_benchmark.py).
+_LOSS_BT_PATH = (
+    "CHECKPOINTS/LOSS_APPROACHs_1212-2_only_select"
+    "/20251212_2206-LOSS_APPROACHs_1212-2_only_select_E_1034.pt"
+)
 
 # ── constants ──────────────────────────────────────────────────────────────────
 ACTION_PLACE = np.uint8(0)  # teacher places the selected piece
@@ -75,9 +83,16 @@ def _make_bot(name: str):
     if name.startswith("minimax_d"):
         depth = int(name.removeprefix("minimax_d"))
         return MinimaxBot(depth=depth)
+    if name == "loss_BT":
+        return CNNBot(
+            model_path=_LOSS_BT_PATH,
+            model_class=QuartoCNN_uncoupled,
+            deterministic=False,
+            temperature=0.1,
+        )
     raise ValueError(
         f"Unknown opponent name: {name!r}.  "
-        "Supported: random, minimax_d1, minimax_d2, minimax_d3"
+        "Supported: random, minimax_d1, minimax_d2, minimax_d3, loss_BT"
     )
 
 
