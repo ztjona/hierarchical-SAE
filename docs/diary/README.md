@@ -37,6 +37,8 @@ which experiment uses it.
 | O | [series-O.md](series-O.md) | Unified 32-d aux variant of the M trunk (SAE substrate) |
 | P | [series-P.md](series-P.md) | Frozen-trunk select-head test (negative result, 2026-05) |
 | Q | [series-Q.md](series-Q.md) | Auxiliary legality + no inference mask (failed gate, 2026-05) |
+| R | [series-R.md](series-R.md) | Per-head loss reweighting — `loss_select` floor, gradient-starvation rejected (2026-05) |
+| S | [series-S.md](series-S.md) | Structural trunk variants — Sa(3) new interpretability champion candidate (2026-05) |
 
 ### Design notes
 
@@ -44,6 +46,7 @@ which experiment uses it.
 |---|---|---|
 | 2026-05-08 | [unified-aux-trunk](2026-05-08_unified-aux-trunk.md) | 32-d phase-stable aux + `unified_autoreg` schema. Substrate of OA series. |
 | 2026-05-11 | [qc-no-mask](2026-05-11_qc-no-mask.md) | QC architecture: wider fc1, auxiliary legality head, no inference mask. Substrate of Q-series. |
+| 2026-05-14 | [qselect-target-rethink](2026-05-14_qselect-target-rethink.md) | Q_select target may be noisy; proposes minimax-oracle distillation. Substrate of T-series (proposed). |
 
 ## How agents should use this folder
 
