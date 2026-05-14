@@ -162,3 +162,80 @@ class MinimaxBot(BotAI):
                 if beta <= alpha:
                     break  # Prune
             return min_eval, best_piece
+
+    # ────────────────────────────────────────────────────────────────────
+    # Soft-label support: per-action scoring at the top level
+    # ────────────────────────────────────────────────────────────────────
+    def score_all_moves(
+        self, game: QuartoGame
+    ) -> tuple[dict[int, float], int]:
+        """Score every legal action at the current decision point.
+
+        The phase is inferred from ``game.pick``: True = SELECT (minimizing),
+        False = PLACE (maximizing).
+
+        Top-level enumeration is performed WITHOUT alpha-beta pruning so that
+        every legal action receives a score. Inner recursion still uses
+        alpha-beta. Returns ``(scores, action_kind)`` where:
+
+        - ``scores``: dict mapping the action index in ``[0,15]`` to its
+          minimax value (higher is better in PLACE; lower is better in SELECT,
+          since SELECT minimises the opponent's value).
+        - ``action_kind``: 0 = PLACE, 1 = SELECT.
+        """
+        if game.pick:  # SELECT phase
+            scores: dict[int, float] = {}
+            for piece_to_give in game.storage_board.get_valid_pieces():
+                new_state = copy.deepcopy(game)
+                coord = new_state.storage_board.find_piece(piece_to_give)
+                if coord is None:
+                    continue
+                new_state.storage_board.remove_piece(*coord)
+                new_state.selected_piece = piece_to_give
+                new_state.pick = False
+                new_state.turn = not new_state.turn
+                ev, _ = self._minimax(
+                    new_state, self.depth - 1, float("-inf"), float("inf"), True
+                )
+                piece_idx = int(
+                    piece_to_give.vectorize_onehot().reshape(-1).argmax()
+                )
+                scores[piece_idx] = float(ev)
+            return scores, 1
+
+        # PLACE phase
+        scores = {}
+        assert isinstance(
+            game.selected_piece, Piece
+        ), "PLACE phase requires a selected_piece"
+        piece_to_place = game.selected_piece
+        for r_g, c_g in game.game_board.get_valid_moves():
+            new_state = copy.deepcopy(game)
+            new_state.game_board.put_piece(piece_to_place, r_g, c_g)
+            if new_state.game_board.check_win(new_state.mode_2x2)[0]:
+                ev = 100.0 + self.depth  # immediate win
+            else:
+                new_state.pick = True
+                ev, _ = self._minimax(
+                    new_state, self.depth - 1, float("-inf"), float("inf"), False
+                )
+            pos_idx = new_state.game_board.pos2index(r_g, c_g)
+            scores[int(pos_idx)] = float(ev)
+        return scores, 0
+
+
+def best_action_set(
+    scores: dict[int, float], action_kind: int
+) -> set[int]:
+    """Return the set of action indices that achieve the optimal score.
+
+    PLACE: argmax over scores. SELECT: argmin over scores (selector
+    minimises the opponent's value).
+    """
+    if not scores:
+        return set()
+    if action_kind == 0:  # PLACE — maximize
+        best = max(scores.values())
+    else:  # SELECT — minimize
+        best = min(scores.values())
+    return {idx for idx, sc in scores.items() if sc == best}

@@ -40,3 +40,17 @@
 ![Training curves](training_curves.png)
 
 ## Notes
+
+> **2026-05-13 — augmentation bug retroactively identified.** The
+> `_pos_inv` table in `train.py` composed flip and CW-rotation in the
+> wrong order for transforms t ∈ {4,5,6,7}, mislabeling PLACE targets
+> and PLACE legal masks in 4 of every 8 augmented copies of every
+> PLACE sample (DAgger-collected samples included). SELECT samples
+> are unaffected. **Practical implication for the headline result:**
+> the +6 pp val-accuracy gain reported here over A1 is the sum of
+> (a) the actual DAgger contribution and (b) any noise reduction
+> coming from the *cleaner* 4/8 copies still dominating training. The
+> 0 % WR vs `minimax_d2` and 48 % WR vs `loss-BT` should be re-read in
+> a follow-up run with the fix applied (C-series and beyond use the
+> corrected `_pos_inv`). Fix details: project README →
+> `Operational notes`.

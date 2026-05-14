@@ -148,6 +148,31 @@ python projects/supervised-cloning/clone_benchmark.py B1_dagger_diverse --matche
   non-terminal move). Low val top-1 doesn't mean a bad model — track top-3
   as well, or evaluate via win rate.
 
+### Known issues / retroactive fixes
+
+- **Symmetry-augmentation flip-ordering bug (fixed 2026-05-13).** The
+  `_pos_inv(idx, t)` table in `train.py` previously composed the column
+  flip *after* the CW rotation when inverting transforms t ∈ {4,5,6,7}.
+  The forward pipeline applies `rot90_CCW^k` then `flip_cols`, so the
+  inverse must apply *flip first*, then CW^k. The buggy order silently
+  mislabeled PLACE targets, PLACE legal masks, and (in C-series and
+  beyond) PLACE soft-target distributions in 4 of every 8 augmented
+  copies of every PLACE sample. SELECT samples are unaffected
+  (piece-indexed). This was not the same bug as the pre-2026-05-08
+  "forward/inverse confusion" fix noted in `CLAUDE.md`; both flaws
+  coexisted until now.
+  - **Impact on prior experiments.** `A1_baseline_cnn`,
+    `B1_dagger_diverse_bc`, and `B1_dagger_diverse` were all trained
+    with the buggy table. Their PLACE-head numbers are conservative;
+    SELECT-head numbers stand. Headline win-rate deltas from `B1` vs
+    `A1` should be re-evaluated alongside C-series runs (which use the
+    corrected table) before being treated as a clean DAgger effect.
+  - **Detection.** A unit test
+    (`tests/test_symmetry_augmentation.py::test_place_label_follows_board_rotation`)
+    now asserts that after each of the 8 D4 transforms, the post-rotation
+    PLACE label points to the cell where the piece actually ended up on
+    the rotated board.
+
 ## File map
 
 | File | Purpose |
