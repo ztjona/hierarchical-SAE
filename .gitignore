@@ -3,6 +3,8 @@ commands.md
 logs/**.log
 *.html
 .claude/
+*.npz
+
 # train_scripts/**.py
 # train_scripts/legacy/**.py
 
