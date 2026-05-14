@@ -11,7 +11,10 @@ Usage:
     train.py [options]
 
 Options:
-    --data <path>         Input .npz file   [default: projects/supervised-cloning/data/collected_5k.npz]
+    --data <paths>        One or more input .npz files, comma-separated.  When more than
+                          one is given, samples are concatenated and game_ids in later
+                          files are offset to remain unique across files.
+                          [default: projects/supervised-cloning/data/collected_5k.npz]
     --exp <name>          Experiment name, e.g. A1_baseline_cnn.  Output goes to
                           projects/supervised-cloning/experiments/<name>/
                           Overrides --out when provided.
@@ -23,6 +26,8 @@ Options:
     --val-split <float>   Val fraction      [default: 0.15]
     --lam <float>         SELECT loss weight relative to PLACE  [default: 1.0]
     --seed <int>          Random seed       [default: 42]
+    --n-matches-eval <int>  Matches per baseline for final win-rate eval  [default: 50]
+    --no-eval             Skip win-rate evaluation after training.
     -h, --help            Show this help.
 
 Examples:
@@ -61,6 +66,10 @@ from tqdm import tqdm
 from docopt import docopt
 
 from models.CNN1 import QuartoCNN
+from bot.CNN_bot import Quarto_bot
+from bot.random_bot import Quarto_bot as RandomBot
+from bot.minimax_bot import MinimaxBot
+from quartopy import play_games
 
 # ── action constants ───────────────────────────────────────────────────────────
 ACTION_PLACE = 0
@@ -225,11 +234,34 @@ class QuartoDataset(Dataset):
         )
 
 
-def load_split(npz_path: Path, val_split: float, seed: int):
-    """Load .npz and split by game_id to avoid leakage."""
-    d = np.load(npz_path)
-    boards, pieces, labels = d["boards"], d["pieces"], d["labels"]
-    actions, legal_masks, game_ids = d["actions"], d["legal_masks"], d["game_ids"]
+def _load_npz_list(npz_paths: list[Path]):
+    """Concatenate one or more .npz files, offsetting game_ids so they stay unique."""
+    boards_l, pieces_l, labels_l, actions_l, masks_l, gids_l = [], [], [], [], [], []
+    gid_offset = 0
+    for p in npz_paths:
+        d = np.load(p)
+        gids = d["game_ids"].astype(np.int64) + gid_offset
+        gid_offset = int(gids.max()) + 1
+        boards_l.append(d["boards"])
+        pieces_l.append(d["pieces"])
+        labels_l.append(d["labels"])
+        actions_l.append(d["actions"])
+        masks_l.append(d["legal_masks"])
+        gids_l.append(gids.astype(np.int32))
+        print(f"  loaded {p}  N={len(d['labels']):,}")
+    return (
+        np.concatenate(boards_l, axis=0),
+        np.concatenate(pieces_l, axis=0),
+        np.concatenate(labels_l, axis=0),
+        np.concatenate(actions_l, axis=0),
+        np.concatenate(masks_l, axis=0),
+        np.concatenate(gids_l, axis=0),
+    )
+
+
+def load_split(npz_paths: list[Path], val_split: float, seed: int):
+    """Load one-or-more .npz files and split by game_id to avoid leakage."""
+    boards, pieces, labels, actions, legal_masks, game_ids = _load_npz_list(npz_paths)
 
     unique_games = np.unique(game_ids)
     rng = np.random.default_rng(seed)
@@ -264,6 +296,71 @@ def masked_ce(
     logits = logits.clone()
     logits[~mask] = float("-inf")
     return F.cross_entropy(logits, targets)
+
+
+# ── win-rate evaluation ────────────────────────────────────────────────────────
+
+#: Baselines for the final win-rate evaluation.  Pairs of (name, rival_instance).
+#: Add or remove entries here to customise the evaluation opponents.
+EVAL_BASELINES = [
+    ("random", lambda: RandomBot()),
+    ("minimax_d2", lambda: MinimaxBot(depth=2)),
+]
+
+
+def run_win_rate_eval(
+    model: QuartoCNNLogits,
+    n_matches: int,
+    mode_2x2: bool,
+) -> dict[str, float]:
+    """Evaluate the model against each baseline and return win rates.
+
+    Each baseline is played ``n_matches`` times total (n_matches//2 as P1,
+    n_matches//2 as P2), mirroring the ``run_contest`` pattern in trainRL.
+    Win rate = (wins + 0.5*draws) / total_games.
+    """
+    player = Quarto_bot(model=model, deterministic=True, temperature=0.1)
+    win_rates: dict[str, float] = {}
+
+    for rival_name, rival_factory in EVAL_BASELINES:
+        rival = rival_factory()
+        wins = losses = draws = 0
+
+        # play as P1
+        _, stats = play_games(
+            matches=n_matches // 2,
+            player1=player,
+            player2=rival,
+            verbose=False,
+            save_match=False,
+            mode_2x2=mode_2x2,
+            PROGRESS_MESSAGE="",
+        )
+        wins += stats["Player 1"]
+        losses += stats["Player 2"]
+        draws += stats["Tie"]
+
+        # play as P2 (rival factory re-instantiated to reset any state)
+        rival = rival_factory()
+        _, stats = play_games(
+            matches=n_matches // 2,
+            player1=rival,
+            player2=player,
+            verbose=False,
+            save_match=False,
+            mode_2x2=mode_2x2,
+            PROGRESS_MESSAGE="",
+        )
+        wins += stats["Player 2"]
+        losses += stats["Player 1"]
+        draws += stats["Tie"]
+
+        total = wins + losses + draws
+        win_rates[rival_name] = (
+            (wins + draws * 0.5) / total if total > 0 else float("nan")
+        )
+
+    return win_rates
 
 
 # ── one epoch ─────────────────────────────────────────────────────────────────
@@ -346,7 +443,9 @@ def main():
     val_spl = float(args["--val-split"])
     lam = float(args["--lam"])
     seed = int(args["--seed"])
-    data_p = Path(args["--data"])
+    n_matches_eval = int(args["--n-matches-eval"])
+    do_eval = not args["--no-eval"]
+    data_paths = [Path(s.strip()) for s in args["--data"].split(",") if s.strip()]
     exp_name = args["--exp"]
     if exp_name:
         out_dir = Path("projects/supervised-cloning/experiments") / exp_name
@@ -360,11 +459,11 @@ def main():
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device   : {device}")
-    print(f"Data     : {data_p}")
+    print(f"Data     : {[str(p) for p in data_paths]}")
     print(f"Output   : {out_dir}")
     print(f"Epochs   : {epochs}  |  Batch: {batch}  |  LR: {lr}  |  lam: {lam}\n")
 
-    train_ds, val_ds = load_split(data_p, val_spl, seed)
+    train_ds, val_ds = load_split(data_paths, val_spl, seed)
     print(f"Train samples: {len(train_ds):,}  |  Val samples: {len(val_ds):,}\n")
 
     train_dl = DataLoader(train_ds, batch_size=batch, shuffle=True, num_workers=0)
@@ -428,6 +527,20 @@ def main():
     torch.save(model.state_dict(), final_path)
     print(f"\nBest val accuracy : {best_val_acc:.2%}  →  {best_path}")
     print(f"Final checkpoint  : {final_path}")
+
+    # ── win-rate evaluation (best checkpoint) ─────────────────────────────────
+    win_rates: dict[str, float] = {}
+    if do_eval:
+        print(
+            f"\nEvaluating best checkpoint against baselines ({n_matches_eval} matches each)…"
+        )
+        eval_model = QuartoCNNLogits().to(device)
+        eval_model.load_state_dict(torch.load(best_path, map_location=device))
+        eval_model.eval()
+        win_rates = run_win_rate_eval(eval_model, n_matches_eval, mode_2x2=True)
+        print("\nWin-rate results (best checkpoint):")
+        for rival_name, wr in win_rates.items():
+            print(f"  vs {rival_name}: {wr:.2%}")
 
     # ── training curves ────────────────────────────────────────────────────────
     epochs_range = range(1, epochs + 1)
@@ -528,7 +641,7 @@ def main():
         f"## Config",
         f"| Key | Value |",
         f"|-----|-------|",
-        f"| data | `{data_p}` |",
+        f"| data | {', '.join(f'`{p}`' for p in data_paths)} |",
         f"| epochs | {epochs} |",
         f"| batch | {batch} |",
         f"| lr | {lr} |",
@@ -554,6 +667,17 @@ def main():
         f"| SELECT top-1 (final) | {history['train_sel_acc'][-1]:.2%} | {history['val_sel_acc'][-1]:.2%} |",
         f"| SELECT top-3 (final) | {history['train_sel_top3'][-1]:.2%} | {history['val_sel_top3'][-1]:.2%} |",
         f"",
+    ]
+    if win_rates:
+        md_lines += [
+            f"## Win-rate evaluation (best checkpoint, {n_matches_eval} matches each)",
+            f"| Baseline | Win rate |",
+            f"|----------|----------|",
+        ]
+        for rival_name, wr in win_rates.items():
+            md_lines.append(f"| {rival_name} | {wr:.2%} |")
+        md_lines.append(f"")
+    md_lines += [
         f"![Training curves](training_curves.png)",
         f"",
         f"## Notes",
