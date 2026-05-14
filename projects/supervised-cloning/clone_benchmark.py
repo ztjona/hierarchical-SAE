@@ -82,7 +82,7 @@ def run_benchmark(
     model.to(device)
     model.eval()
 
-    player = UnifiedBot(model=model, deterministic=False, temperature=0.1)
+    player = UnifiedBot(model=model, deterministic=False, temperature=0.01)
 
     win_rates: dict[str, float] = {}
     for rival_name, rival_factory in BASELINES:
