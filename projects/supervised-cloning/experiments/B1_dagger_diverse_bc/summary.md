@@ -34,3 +34,14 @@
 ![Training curves](training_curves.png)
 
 ## Notes
+
+> **2026-05-13 — augmentation bug retroactively identified.** The
+> `_pos_inv` table in `train.py` composed flip and CW-rotation in the
+> wrong order for transforms t ∈ {4,5,6,7}, mislabeling PLACE targets,
+> PLACE legal masks, and SELECT soft targets (none in this run, since
+> soft targets did not yet exist) in 4 of every 8 augmented copies of
+> every PLACE sample. SELECT samples are unaffected. This run is the
+> *interim* clone in the B1 DAgger flow; PLACE numbers above are
+> conservative vs. what a re-run with the fixed augmentation would
+> reach on the same data. Fix details: project README →
+> `Operational notes`.

@@ -37,6 +37,14 @@ bitten us. They live here because they're load-bearing for code changes.
   via gather indexing (`mask[:, perm_inv]`). Conflating them silently
   mislabels 7/8 of every augmented copy. The pre-2026-05 single-table
   version of this code was buggy; do not revert.
+- **Augmentation inverse order matters: flip-then-CW, not CW-then-flip.**
+  The forward pipeline applies `rot90_CCW^k` then `flip_cols`. The
+  inverse is `rot90_CW^k ∘ flip` — i.e. invert the flip *first*, then
+  invert the rotations. Reversing the order silently mislabels 4/8 of
+  every augmented copy (transforms t ∈ {4,5,6,7}). Pre-2026-05-13 code
+  had this bug; A1/B1 experiments inherit conservative PLACE numbers as
+  a result. Guarded by
+  `tests/test_symmetry_augmentation.py::test_place_label_follows_board_rotation`.
 - **Mask transformation applies only to PLACE samples.** SELECT legal
   masks are 16-d piece-availability masks and are *rotation-invariant*.
   Applying a board-position permutation to a SELECT mask scrambles which
@@ -130,6 +138,15 @@ python projects/supervised-cloning/collect_data.py -g 5000 -d 2 --seed 42 \
   See operational rule above. The pre-fix code corrupted PLACE labels
   *and* SELECT legal masks under 7/8 of the augmentations; experiments
   produced before the fix should be considered untrusted and re-run.
+- **Symmetry-augmentation flip-vs-rotation inverse order** (fixed
+  2026-05-13). Independent of the 2026-05-08 fix above. `_pos_inv`
+  composed flip *after* CW rotation when inverting transforms
+  t ∈ {4,5,6,7}; the correct order is flip first, then CW. The bug
+  mislabeled PLACE targets, PLACE legal masks, and (once added) PLACE
+  soft-target distributions in 4/8 of every augmented copy. A1, B1_bc,
+  and B1_dagger_diverse were all trained with the buggy table; their
+  PLACE-head metrics understate what the same data + corrected
+  augmentation would have produced. SELECT samples are unaffected.
 - **`checkpoints/` as a tracked artifact area** (cleaned 2026-05-08). The
   initial layout used `checkpoints/` for both ad-hoc runs and the only
   named run, blurring the run/experiment distinction. The current

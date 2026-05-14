@@ -34,3 +34,16 @@
 ![Training curves](training_curves.png)
 
 ## Notes
+
+> **2026-05-13 — augmentation bug retroactively identified.** The
+> `_pos_inv` permutation table in `train.py` had the flip and
+> CW-rotation composed in the wrong order for transforms t ∈ {4,5,6,7}
+> (the four flip-composed copies). That silently mislabeled PLACE
+> targets, PLACE legal masks, *and* — once it was added — PLACE
+> soft-target distributions in 4 of every 8 augmented copies of every
+> PLACE sample. This run was trained with the buggy augmentation, so
+> the PLACE-head numbers above understate what the same data + correct
+> augmentation would have produced. SELECT samples are not affected
+> (no board-position permutation is applied to them). Win-rate
+> numbers were not recorded in this summary at the time. Fix details:
+> see project README → `Operational notes`.
