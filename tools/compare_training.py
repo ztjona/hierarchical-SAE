@@ -19,6 +19,7 @@ Options:
 import os
 import pickle
 import subprocess
+import sys
 from datetime import datetime
 import numpy as np
 from docopt import docopt
@@ -29,6 +30,9 @@ from pathlib import Path
 import re
 import colorsys
 from tqdm import tqdm
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from QuartoRL.results_io import compute_wr_trend  # noqa: E402
 
 # Configuration
 # EXPERIMENT_NAME can be a single string or a list of experiment names to combine
@@ -267,19 +271,33 @@ def extract_param_name_from_folder(folder_name):
         return "Sweep"
     return None
 
-def extract_fallback_value(folder_name):
-    # Match everything after )\d{4}_
+def extract_auto_param(folder_name):
+    # Returns (name, value)
     match = re.match(r".*?\)\d{4}_(.+)$", folder_name)
     if not match:
-        return None
+        return None, None
     tag = match.group(1)
-    if "_" in tag:
-        val_str = tag.split("_", 1)[1]
+    
+    m = re.match(r"^([A-Za-z_]+?)_((?:[0-9]|S[0-9]).*)$", tag)
+    if m:
+        name = m.group(1)
+        val_str = m.group(2)
         try:
-            return float(val_str)
+            return name, float(val_str)
         except ValueError:
-            return val_str
-    return tag
+            return name, val_str
+
+    # Generic split on last underscore if the above fails
+    m = re.match(r"^(.+)_([0-9.e-]+)$", tag)
+    if m:
+        name = m.group(1)
+        val_str = m.group(2)
+        try:
+            return name, float(val_str)
+        except ValueError:
+            return name, val_str
+            
+    return "Sweep", tag
 
 def extract_trailing_numeric_value(folder_name):
     """Extract the trailing numeric token from a folder name.
@@ -345,16 +363,17 @@ def find_experiment_folders(base_path, experiment_names):
                 continue
             param_value = extract_param_value(folder.name)
             param_name = PARAM_NAME
+            
             if param_value is None:
-                param_value = extract_trailing_numeric_value(folder.name)
-                real_param_name = extract_param_name_from_folder(folder.name)
-                if real_param_name:
-                    param_name = real_param_name
-            if param_value is None:
-                param_value = extract_fallback_value(folder.name)
+                auto_name, auto_value = extract_auto_param(folder.name)
+                if auto_value is not None:
+                    param_name = auto_name
+                    param_value = auto_value
+            
             if param_value is None:
                 param_value = extract_run_index(folder.name)
                 param_name = "run"
+            
             if param_value is not None:
                 folders.append(
                     {
@@ -399,19 +418,24 @@ def load_baseline_experiments(base_path, baselines):
                     # 1) Try current PARAM_NAME-based extractor (for backwards compatibility)
                     # 2) Fallback to trailing numeric token in folder name
                     param_value = extract_param_value(folder.name)
+                    param_name = PARAM_NAME
+
                     if param_value is None:
-                        param_value = extract_trailing_numeric_value(folder.name)
+                        auto_name, auto_value = extract_auto_param(folder.name)
+                        if auto_value is not None:
+                            param_name = auto_name
+                            param_value = auto_value
+
                     # Only include if parameter value matches one of the specified values
                     if param_value is not None and numeric_value_matches(
                         param_value, param_values
                     ):
-                        real_param_name = extract_param_name_from_folder(folder.name)
                         baseline_folders.append(
                             {
                                 "path": folder,
                                 "name": folder.name,
                                 "param_value": param_value,
-                                "param_name": real_param_name or PARAM_NAME,
+                                "param_name": param_name,
                                 "experiment": exp_name,
                                 "is_baseline": True,
                             }
@@ -481,11 +505,12 @@ def _compute_run_metrics(data, tail_fraction=0.1, peak_window=100):
     else:
         final_loss = float("nan")
 
-    final_wrs, peak_wrs = {}, {}
+    final_wrs, peak_wrs, trend_wrs = {}, {}, {}
     for rival, wr_list in data.get("win_rate", {}).items():
         wr = to_numpy(wr_list)
         if len(wr) == 0:
             final_wrs[rival] = peak_wrs[rival] = None
+            trend_wrs[rival] = None
             continue
         tail_e = max(1, int(len(wr) * tail_fraction))
         final_wrs[rival] = float(np.mean(wr[-tail_e:]))  # type: ignore
@@ -495,12 +520,16 @@ def _compute_run_metrics(data, tail_fraction=0.1, peak_window=100):
             peak_wrs[rival] = float(smoothed.max())
         else:
             peak_wrs[rival] = float(np.max(wr))  # type: ignore
+        # Same trend statistic used in the JSONL final record so the
+        # markdown table matches the machine-readable summary.
+        trend_wrs[rival] = compute_wr_trend(wr, smooth_window=peak_window, back_half=True)
 
     return {
         "n_epochs": n_epochs,
         "final_loss": final_loss,
         "final_wrs": final_wrs,
         "peak_wrs": peak_wrs,
+        "trend_wrs": trend_wrs,
     }
 
 
@@ -534,9 +563,20 @@ def write_summary_md(all_data, folders, results_dir, exp_filename, exp_display):
     def fmt_loss(v):
         return f"{v:.4f}" if not np.isnan(v) else "—"
 
+    def fmt_trend(t):
+        """Slope in pp/1k epochs, with ↑ marker if 95% CI excludes zero on the
+        positive side. '—' for missing / too-short series."""
+        if not isinstance(t, dict):
+            return "—"
+        s = t.get("slope_pp_per_1000ep")
+        if s is None:
+            return "—"
+        marker = "↑" if t.get("still_rising") else ""
+        return f"{s:+.1f}{marker}"
+
     header = ["Run", "Param", "Epochs", "Final loss"]
     for r in rival_names:
-        header.extend([f"Final vs {r}", f"Peak vs {r}"])
+        header.extend([f"Final vs {r}", f"Peak vs {r}", f"Trend vs {r}"])
 
     def render_table(recs):
         if not recs:
@@ -552,6 +592,7 @@ def write_summary_md(all_data, folders, results_dir, exp_filename, exp_display):
             for r in rival_names:
                 row.append(fmt_wr(rec["final_wrs"].get(r)))
                 row.append(fmt_wr(rec["peak_wrs"].get(r)))
+                row.append(fmt_trend(rec.get("trend_wrs", {}).get(r)))
             rows.append(row)
         widths = [
             max(len(str(h)), *(len(str(r[i])) for r in rows))
@@ -588,7 +629,11 @@ def write_summary_md(all_data, folders, results_dir, exp_filename, exp_display):
         f"Runs: {len(exp_records)} (+ {len(base_records)} baselines)",
         "",
         "Final metrics = mean over the last 10% of epochs. `Peak` = max of the "
-        "smoothed win-rate curve reached at any point during training.",
+        "smoothed win-rate curve reached at any point during training. "
+        "`Trend` = OLS slope (pp per 1000 epochs) on the smoothed back half of "
+        "the WR curve, decimated to the smoothing window for approximate "
+        "independence; `↑` marks slopes whose 95% CI is strictly positive "
+        "(i.e. the curve was still climbing at the end of training).",
         "",
     ]
 

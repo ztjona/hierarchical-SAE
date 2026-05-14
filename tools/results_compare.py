@@ -142,11 +142,32 @@ def _fmt(v: Any, width: int = 0) -> str:
         s = f"{v:.3f}"
     elif isinstance(v, bool):
         s = "yes" if v else "no"
+    elif isinstance(v, dict) and "slope_pp_per_1000ep" in v:
+        s = _fmt_trend(v)
     else:
         s = str(v)
     if width:
         return s.ljust(width)
     return s
+
+
+def _fmt_trend(t: Any) -> str:
+    """Format a wr_trend dict as 'slope±halfCI (★ if rising)' in pp/1k ep."""
+    if not isinstance(t, dict):
+        return "—"
+    slope = t.get("slope_pp_per_1000ep")
+    lo = t.get("ci_low_pp_per_1000ep")
+    hi = t.get("ci_high_pp_per_1000ep")
+    rising = t.get("still_rising")
+    if slope is None:
+        return "—"
+    half = None
+    if lo is not None and hi is not None:
+        half = (hi - lo) / 2.0
+    marker = "↑" if rising else " "
+    if half is not None:
+        return f"{slope:+.1f}±{half:.1f}{marker}"
+    return f"{slope:+.1f}{marker}"
 
 
 def _common_rivals(recs: list[dict]) -> list[str]:
@@ -171,6 +192,7 @@ def cmd_list(args: argparse.Namespace) -> int:
     header = ["experiment", "epochs", "loss"]
     for rv in rivals:
         header.append(f"WR_final[{rv}]")
+        header.append(f"WR_trend[{rv}]")
     header += ["q_sel_win", "q_pl_win"]
 
     # Sort
@@ -195,7 +217,7 @@ def cmd_list(args: argparse.Namespace) -> int:
     print("  ".join("-" * w for w in widths))
     for e, r in recs:
         if r is None:
-            row = [e, "—", "—"] + ["—"] * len(rivals) + ["—", "—"]
+            row = [e, "—", "—"] + ["—", "—"] * len(rivals) + ["—", "—"]
         else:
             row = [
                 e,
@@ -204,6 +226,7 @@ def cmd_list(args: argparse.Namespace) -> int:
             ]
             for rv in rivals:
                 row.append(_fmt((r.get("wr_final") or {}).get(rv)))
+                row.append(_fmt_trend((r.get("wr_trend") or {}).get(rv)))
             row.append(_fmt(r.get("q_select_winners")))
             row.append(_fmt(r.get("q_place_winners")))
         print("  ".join(c.ljust(w) for c, w in zip(row, widths)))
@@ -249,7 +272,7 @@ def cmd_diff(args: argparse.Namespace) -> int:
     # Nested dict metrics
     dict_keys = sorted(
         k for k in (set(ra) | set(rb))
-        if k in ("wr_final", "wr_peak")
+        if k in ("wr_final", "wr_peak", "wr_trend")
     )
     config_keys = sorted(set((ra.get("config") or {}).keys()) | set((rb.get("config") or {}).keys()))
 

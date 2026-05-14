@@ -76,6 +76,119 @@ def _smoothed_tail(values: list[float] | np.ndarray, window: int) -> float | Non
     return _nanmean(a[-window:])
 
 
+def compute_wr_trend(
+    values: list[float] | np.ndarray,
+    smooth_window: int = 100,
+    back_half: bool = True,
+) -> dict[str, float | bool | None]:
+    """Linear-regression slope of a per-epoch WR series on its back half.
+
+    Reports slope in **percentage points per 1000 epochs** plus a 95% CI and
+    a two-sided p-value (normal approximation, accurate for the multi-1000
+    sample sizes we run at). ``still_rising`` is True iff the lower CI bound
+    is strictly positive — i.e. the WR was reliably climbing at the end of
+    training.
+
+    Returns None-valued fields when the series is too short to fit (need at
+    least ``2 * smooth_window`` epochs in the analysis window).
+    """
+    none = {
+        "slope_pp_per_1000ep": None,
+        "ci_low_pp_per_1000ep": None,
+        "ci_high_pp_per_1000ep": None,
+        "p_value": None,
+        "still_rising": None,
+        "n_points": 0,
+        "window_start_epoch": None,
+        "window_end_epoch": None,
+    }
+    if values is None:
+        return none
+    arr = np.asarray(list(values), dtype=float)
+    if arr.size == 0 or np.all(np.isnan(arr)):
+        return none
+
+    # Rolling-mean smoothing matches the elsewhere-used 100-epoch window.
+    if arr.size >= smooth_window:
+        kernel = np.ones(smooth_window) / smooth_window
+        smoothed = np.convolve(arr, kernel, mode="valid")
+        offset = smooth_window - 1  # smoothed[i] corresponds to epoch i+offset
+    else:
+        smoothed = arr
+        offset = 0
+
+    if back_half:
+        start = smoothed.size // 2
+        y_full = smoothed[start:]
+        start_epoch = start + offset
+    else:
+        y_full = smoothed
+        start_epoch = offset
+
+    if y_full.size < max(20, 2 * smooth_window):
+        # Not enough points for a meaningful regression.
+        return none
+
+    # Decimate by the smoothing window so adjacent regression points are
+    # approximately independent — otherwise OLS underestimates SE on
+    # autocorrelated rolling-mean output and `still_rising` over-fires.
+    stride = max(1, smooth_window)
+    idx = np.arange(0, y_full.size, stride)
+    y = y_full[idx]
+    x_epochs = idx.astype(float)  # epoch index relative to start of window
+
+    finite = np.isfinite(y)
+    if finite.sum() < 10:
+        return none
+    x = x_epochs[finite]
+    y = y[finite]
+
+    # OLS slope.
+    x_mean = x.mean()
+    y_mean = y.mean()
+    sxx = float(np.sum((x - x_mean) ** 2))
+    if sxx == 0.0:
+        return none
+    slope = float(np.sum((x - x_mean) * (y - y_mean)) / sxx)
+    intercept = y_mean - slope * x_mean
+    y_pred = slope * x + intercept
+    residuals = y - y_pred
+    n = y.size
+    if n <= 2:
+        return none
+    mse = float(np.sum(residuals ** 2) / (n - 2))
+    se_slope = float(np.sqrt(mse / sxx)) if mse > 0 else 0.0
+
+    # Convert decimal-WR-per-epoch → pp per 1000 epochs (×100 for pp, ×1000
+    # for per-1000ep).
+    SCALE = 100.0 * 1000.0
+    slope_pp = slope * SCALE
+    se_pp = se_slope * SCALE
+    z = 1.96
+    ci_low = slope_pp - z * se_pp
+    ci_high = slope_pp + z * se_pp
+
+    # Two-sided p-value, normal approximation (t→z for n >> 30).
+    if se_pp > 0:
+        from math import erf, sqrt
+
+        z_stat = slope_pp / se_pp
+        p_value = float(2.0 * (1.0 - 0.5 * (1.0 + erf(abs(z_stat) / sqrt(2.0)))))
+    else:
+        p_value = 0.0 if slope_pp != 0 else 1.0
+
+    return {
+        "slope_pp_per_1000ep": float(slope_pp),
+        "ci_low_pp_per_1000ep": float(ci_low),
+        "ci_high_pp_per_1000ep": float(ci_high),
+        "p_value": p_value,
+        "still_rising": bool(ci_low > 0.0),
+        "n_points": int(n),
+        "window_start_epoch": int(start_epoch),
+        "window_end_epoch": int(start_epoch + x[-1]),
+    }
+
+
 def summarize_q_outcome(
     q_arr: Any, outcome_arr: Any, window: int = 100
 ) -> dict[str, float | None]:
@@ -172,11 +285,13 @@ def build_final_record(
     fraction of trailing epochs used for ``wr_final`` (default 10%)."""
     wr_final: dict[str, float | None] = {}
     wr_peak: dict[str, float | None] = {}
+    wr_trend: dict[str, dict[str, float | bool | None]] = {}
     for rival, values in (win_rate or {}).items():
         arr = np.asarray(list(values), dtype=float)
         if arr.size == 0:
             wr_final[str(rival)] = None
             wr_peak[str(rival)] = None
+            wr_trend[str(rival)] = compute_wr_trend([], smooth_window=smooth_window_final)
             continue
         tail = max(1, int(arr.size * final_window_frac))
         wr_final[str(rival)] = float(arr[-tail:].mean())
@@ -187,6 +302,9 @@ def build_final_record(
         else:
             smoothed = arr
         wr_peak[str(rival)] = float(smoothed.max())
+        wr_trend[str(rival)] = compute_wr_trend(
+            arr, smooth_window=smooth_window_final, back_half=True
+        )
 
     qsel = summarize_q_outcome(
         q_values_history.get("q_select", []),
@@ -220,6 +338,7 @@ def build_final_record(
         ),
         "wr_final": wr_final,
         "wr_peak": wr_peak,
+        "wr_trend": wr_trend,
         "q_select_winners": qsel["win"],
         "q_select_losers": qsel["loss"],
         "q_place_winners": qplace["win"],
