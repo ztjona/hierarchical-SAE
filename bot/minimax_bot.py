@@ -85,13 +85,15 @@ class MinimaxBot(BotAI):
         - is_maximizing_player: True when placing a piece, False when selecting a piece.
         """
         # --- Base Cases: Game is Over or Depth Limit Reached ---
-        # NOTE: ``check_win`` returns ``tuple[bool, coords | None]``. The bare
-        # call evaluates as truthy for *any* tuple (including ``(False, None)``)
-        # — must subscript ``[0]`` to read the actual win flag.
-        if (
-            game_state.game_board.last_move is not None
-            and game_state.game_board.check_win(game_state.mode_2x2)[0]
-        ):
+        # NOTE: ``check_win`` historically returned ``tuple[bool, coords]`` in
+        # one quartopy version and a bare ``bool`` in another. Handle both so
+        # the bot works against either API.
+        if game_state.game_board.last_move is not None:
+            res = game_state.game_board.check_win(game_state.mode_2x2)
+            won = res[0] if isinstance(res, tuple) else bool(res)
+        else:
+            won = False
+        if won:
             # If a win is detected, the player who made the LAST move won.
             # 'is_maximizing_player' is for the CURRENT turn. The winner is the player from the PREVIOUS turn.
             if is_maximizing_player:
@@ -119,8 +121,10 @@ class MinimaxBot(BotAI):
                 new_game_state.game_board.put_piece(piece_to_place, r_g, c_g)
 
                 # If this move is a winning move, it's the best possible move.
-                # ``check_win`` returns a tuple — subscript [0] for the flag.
-                if new_game_state.game_board.check_win(new_game_state.mode_2x2)[0]:
+                # ``check_win`` may return a tuple or a bare bool depending on
+                # the installed quartopy version.
+                _res = new_game_state.game_board.check_win(new_game_state.mode_2x2)
+                if (_res[0] if isinstance(_res, tuple) else bool(_res)):
                     return 100 + depth, (r_g, c_g)
 
                 new_game_state.pick = True  # Switch to selection phase
@@ -212,7 +216,8 @@ class MinimaxBot(BotAI):
         for r_g, c_g in game.game_board.get_valid_moves():
             new_state = copy.deepcopy(game)
             new_state.game_board.put_piece(piece_to_place, r_g, c_g)
-            if new_state.game_board.check_win(new_state.mode_2x2)[0]:
+            _res = new_state.game_board.check_win(new_state.mode_2x2)
+            if (_res[0] if isinstance(_res, tuple) else bool(_res)):
                 ev = 100.0 + self.depth  # immediate win
             else:
                 new_state.pick = True

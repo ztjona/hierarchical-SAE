@@ -54,7 +54,7 @@ logger.info("Imports done.")
 
 # STARTING_NET = "CHECKPOINTS\\Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8\\20260227_1103-Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8_E_5000.pt"
 STARTING_NET = None  # Set to None to start with random weights
-EXPERIMENT_NAME = "OA_unifiedAux"
+EXPERIMENT_NAME = "Ta_minimaxSelect(1)0514_DEPTH_2"
 CHECKPOINT_FOLDER = f"./CHECKPOINTS/{EXPERIMENT_NAME}/"
 # Series root = the experiment family (everything before the "(idx)MMDD_..." tag
 # appended by run_trains.py). JSONL summaries live alongside per-series notes
@@ -67,7 +67,7 @@ RESULTS_FOLDER = f"./results/{SERIES_ROOT}/"
 #   "decoupled_autoreg" → QuartoCNNAutoreg / QuartoCNNAutoregUnbound           +  Quarto_autoreg_bot
 #   "unified_autoreg"   → QuartoCNNAutoregUnified / QuartoCNNAutoregUnifiedUnbound + Quarto_unified_bot
 TRANSITION_SCHEMA = "unified_autoreg"
-ARCHITECTURE = QuartoCNNAutoregUnified
+ARCHITECTURE = QuartoCNNAutoregUnifiedS4
 PLAYER_BOT_CLASS = Quarto_unified_bot
 # ARCHITECTURE = QuartoCNNAutoreg                  # ← use with decoupled_autoreg
 # PLAYER_BOT_CLASS = Quarto_autoreg_bot             # ← use with decoupled_autoreg
@@ -94,7 +94,7 @@ DECOUPLED_TARGET_STYLE = "td_place_mc_select"  # Options: "td_place_mc_select", 
 #
 # When True, this overrides DECOUPLED_TARGET_STYLE to "td_place_minimax_select"
 # at the bottom of this block.
-USE_MINIMAX_SELECT_TARGET = False
+USE_MINIMAX_SELECT_TARGET = True
 MINIMAX_SELECT_DEPTH = 2  # Used only when USE_MINIMAX_SELECT_TARGET is True.
 
 if USE_MINIMAX_SELECT_TARGET:

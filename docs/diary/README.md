@@ -39,6 +39,7 @@ which experiment uses it.
 | Q | [series-Q.md](series-Q.md) | Auxiliary legality + no inference mask (failed gate, 2026-05) |
 | R | [series-R.md](series-R.md) | Per-head loss reweighting — `loss_select` floor, gradient-starvation rejected (2026-05) |
 | S | [series-S.md](series-S.md) | Structural trunk variants — Sa(3) new interpretability champion candidate (2026-05) |
+| T | [series-T.md](series-T.md) | Minimax-oracle distillation on the SELECT head (2026-05, in flight) |
 
 ### Design notes
 

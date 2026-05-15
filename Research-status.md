@@ -81,7 +81,7 @@ Next direction: **minimax-oracle labels for the select head**
 | Q | unified + aux legality + no mask | `QuartoCNNUnifiedNoMask` + `Quarto_unified_nomask_bot` | done (gate failed) — `series-Q.md`, `docs/diary/2026-05-11_qc-no-mask.md` |
 | R | per-head loss weighting | OA-family | done (gate failed) — `series-R.md` |
 | S | structural trunk variants | OA-family | done (mixed) — `series-S.md`; Sa(3) candidate new interp champion |
-| **T** | **minimax-oracle select target** | OA-family / Sa(3) | **proposed** — `docs/diary/2026-05-14_qselect-target-rethink.md` |
+| **T** | **minimax-oracle select target** | Sa(3) | **in flight** — `series-T.md`; design note `docs/diary/2026-05-14_qselect-target-rethink.md` |
 
 ## Recent results
 
@@ -138,26 +138,33 @@ Saturation is **not** a head-level pathology. Full write-up in
 
 ## Forward queue
 
-1. **Ta_minimaxSelect** — *new direction.* Supervised distillation of
-   `Q_select` from a minimax-oracle label (depth 4 starting point);
-   `Q_place` continues to learn from `td_place_mc_select` Bellman targets.
-   Substrate: OA-family or Sa(3) post-confirmation. Gate: `loss_select` ≤
-   0.10, Q_select Δ ≥ +0.40, WR vs `bot_loss-BT` ≥ 70%. Design note:
-   [`docs/diary/2026-05-14_qselect-target-rethink.md`](docs/diary/2026-05-14_qselect-target-rethink.md).
+1. **Ta_minimaxSelect(1)** — *in flight.* `USE_MINIMAX_SELECT_TARGET=True`
+   in `trainRL.py` switches the SELECT head from MC return to per-piece
+   minimax labels (depth 2) on the Sa(3) substrate; `Q_place` continues
+   under `td_place_mc_select`. Targets are captured at experience-generation
+   time (frozen in buffer with the policy of that moment). Gate:
+   `loss_select` ≤ 0.10, Q_select Δ ≥ +0.40, WR vs `bot_loss-BT` ≥ 70%.
+   Train script: `train_scripts/Ta_minimaxSelect(1)0514_DEPTH_2.py`.
+   Estimated oracle overhead: ≈ 10–20 hours / 5k-epoch run; cache & depth=1
+   mitigations on deck. Series doc: [`docs/diary/series-T.md`](docs/diary/series-T.md).
 2. **Sa(3) confirmation run** — re-run `Sa_archScan(3)0512_ARCH_S4_uniform512`
    at 10k epochs (curve still rising at 5k) to lock the interpretability-
    champion promotion. Cheap.
-3. **Sb_hybridTrunk** — Sa(3) uniform-512 FC with Sa(1) deeper conv stack on
+3. **Tb_depth4** — Ta variant with `MINIMAX_SELECT_DEPTH=4`. Test whether
+   deeper lookahead breaks the depth-2 information ceiling (most depth-2
+   non-forced positions return 0). Contingent on Ta(1) outcome.
+4. **Sb_hybridTrunk** — Sa(3) uniform-512 FC with Sa(1) deeper conv stack on
    top. Tests whether the WR carrier (Sa(3) via Q_place) and the numeric
-   Q_select gain (Sa(1)) compose. Lower priority than Ta — orthogonal axis.
-4. **Rb_schedAlpha** — time-varying (α_place, α_select). Start (1.0, 1.0)
+   Q_select gain (Sa(1)) compose. Orthogonal to T; runs in parallel.
+5. **Rb_schedAlpha** — time-varying (α_place, α_select). Start (1.0, 1.0)
    for ~2000 epochs, then ramp α_select. Tests whether a warm Q_place trunk
    can absorb select-loss pressure that the cold-start Ra grid could not.
    Lowest priority — Ra's `loss_select` floor is targets-side evidence; Rb
    is the optimisation-side hedge.
 
 All runs use the per-head loss / grad logging and JSONL emission from
-2026-05-12.
+2026-05-12; runs trained after 2026-05-14 also receive `wr_trend` slope
+statistics in their JSONL final record.
 
 ---
 

@@ -33,6 +33,12 @@ TRANSITION_SCHEMA_UNIFIED_AUTOREG = "unified_autoreg"
 DECOUPLED_TARGET_TD_PLACE_MC_SELECT = "td_place_mc_select"
 DECOUPLED_TARGET_MC_BOTH = "mc_both"
 DECOUPLED_TARGET_TD_PLACE_TD_SELECT = "td_place_td_select"
+# T-series: Q_place uses TD/Bellman; Q_select is supervised by per-piece
+# minimax-oracle scores captured at experience generation time (the policy
+# of that moment — targets are frozen in the buffer, not recomputed on
+# replay). Requires `target_sel_minimax` and `target_sel_minimax_mask`
+# fields in the batch.
+DECOUPLED_TARGET_TD_PLACE_MINIMAX_SELECT = "td_place_minimax_select"
 DISCOUNT_REWARD_GAMMA = 0.8
 
 PHASE_PLACE = 0
@@ -99,6 +105,70 @@ def _unified_aux(piece_index: int, available_pieces: set[int]) -> np.ndarray:
     offered = _piece_index_to_vector(piece_index)
     available = _available_pieces_mask(available_pieces)
     return np.concatenate([offered, available]).astype(np.float32)
+
+
+def _minimax_select_target(
+    oracle,
+    board_serial: str,
+    available_pieces: set[int],
+    mode_2x2: bool,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Score every legal SELECT action with a minimax oracle.
+
+    Builds a transient ``QuartoGame`` from the serialized board + available
+    storage state and queries ``oracle.score_all_moves(game)`` at the SELECT
+    phase. Returns ``(target_vec, mask_vec)`` both shape ``(16,)``:
+
+    - ``target_vec[piece_idx]``: minimax value normalized to roughly ``[-1, 1]``,
+      with the sign flipped so that **higher target = better SELECT** (matches
+      the Q_select convention, since the raw minimax score uses lower=better
+      for the selector).
+    - ``mask_vec[piece_idx]``: 1.0 for legal pieces with a valid score, 0.0
+      elsewhere.
+
+    The transient ``QuartoGame`` reuses the project's ``Quarto_bot`` (random)
+    as placeholder players — ``score_all_moves`` does not invoke them; it
+    only reads ``game.game_board``, ``game.storage_board``, ``game.pick``,
+    and ``game.mode_2x2``.
+    """
+    from quartopy import QuartoGame
+    from bot.random_bot import Quarto_bot
+    from bot.minimax_bot import MinimaxBot
+
+    assert isinstance(oracle, MinimaxBot), (
+        f"select_oracle must be a MinimaxBot, got {type(oracle).__name__}"
+    )
+
+    game = QuartoGame(
+        player1=Quarto_bot(), player2=Quarto_bot(), mode_2x2=mode_2x2
+    )
+    # Replace the empty game_board with the actual state.
+    game.game_board = Board.serialized_2_board(board_serial)
+    # Prune storage_board down to ``available_pieces``. The default
+    # storage starts with all 16 pieces; remove the ones already taken.
+    for piece_obj in list(game.storage_board.get_valid_pieces()):
+        if int(piece_obj.index()) not in available_pieces:
+            coord = game.storage_board.find_piece(piece_obj)
+            if coord is not None:
+                game.storage_board.remove_piece(*coord)
+    game.pick = True  # SELECT phase
+    game.selected_piece = None
+
+    scores, action_kind = oracle.score_all_moves(game)
+    assert action_kind == 1, (
+        f"Expected SELECT action_kind=1 from oracle, got {action_kind}"
+    )
+
+    target = np.zeros(16, dtype=np.float32)
+    mask = np.zeros(16, dtype=np.float32)
+    # Normalize so terminal +/-(100+depth) maps to ~+/-1. The selector
+    # convention is "lower minimax score = better piece to give", so we
+    # negate to align with Q_select where higher = better.
+    scale = 100.0 + float(oracle.depth)
+    for piece_idx, score in scores.items():
+        target[piece_idx] = float(np.clip(-score / scale, -1.0, 1.0))
+        mask[piece_idx] = 1.0
+    return target, mask
 
 
 def _valid_position_mask(board_state: str) -> np.ndarray:
@@ -322,6 +392,7 @@ def gen_experience(
     REWARD_FUNCTION_TYPE: str = "propagate",
     TRANSITION_SCHEMA: str = TRANSITION_SCHEMA_JOINT,
     COLLECT_BOARDS: bool = False,
+    select_oracle=None,
 ) -> TensorDict | tuple[TensorDict, list[tuple[Board, Board]]]:
     """
     Generates experience by having two bots play against each other. The experience is returned as a TensorDict.
@@ -387,6 +458,12 @@ def gen_experience(
             mode_2x2=mode_2x2,
             REWARD_FUNCTION_TYPE=REWARD_FUNCTION_TYPE,
             COLLECT_BOARDS=COLLECT_BOARDS,
+            select_oracle=select_oracle,
+        )
+    if select_oracle is not None and TRANSITION_SCHEMA == TRANSITION_SCHEMA_JOINT:
+        raise NotImplementedError(
+            "select_oracle is only supported for TRANSITION_SCHEMA='unified_autoreg' "
+            "(and would need parallel wiring through decoupled_autoreg)."
         )
     if TRANSITION_SCHEMA != TRANSITION_SCHEMA_JOINT:
         raise ValueError(f"Unknown TRANSITION_SCHEMA {TRANSITION_SCHEMA}")
@@ -734,6 +811,7 @@ def gen_experience_unified_autoreg(
     mode_2x2: bool = False,
     REWARD_FUNCTION_TYPE: str = "propagate",
     COLLECT_BOARDS: bool = False,
+    select_oracle=None,
 ):
     """Generate phase-decoupled transitions with phase-stable 32-d aux.
 
@@ -799,6 +877,21 @@ def gen_experience_unified_autoreg(
                         f"Selected piece {action} not available in storage. {mov_description}"
                     )
 
+                # Capture oracle target BEFORE mutating available_pieces — the
+                # SELECT decision is over the pre-removal set.
+                if select_oracle is not None:
+                    target_sel_minimax, target_sel_minimax_mask = (
+                        _minimax_select_target(
+                            select_oracle,
+                            state_board,
+                            available_pieces,
+                            mode_2x2=mode_2x2,
+                        )
+                    )
+                else:
+                    target_sel_minimax = np.zeros(16, dtype=np.float32)
+                    target_sel_minimax_mask = np.zeros(16, dtype=np.float32)
+
                 available_pieces.remove(action)
                 pending_piece = action
 
@@ -824,6 +917,8 @@ def gen_experience_unified_autoreg(
                         "next_phase": next_phase,
                         "next_valid_mask": next_valid_mask,
                         "outcome": outcome,
+                        "target_sel_minimax": target_sel_minimax,
+                        "target_sel_minimax_mask": target_sel_minimax_mask,
                     }
                 )
                 joint_state_index += 1
@@ -873,6 +968,8 @@ def gen_experience_unified_autoreg(
                         "next_phase": next_phase,
                         "next_valid_mask": next_valid_mask,
                         "outcome": outcome,
+                        "target_sel_minimax": np.zeros(16, dtype=np.float32),
+                        "target_sel_minimax_mask": np.zeros(16, dtype=np.float32),
                     }
                 )
 
@@ -970,6 +1067,14 @@ def gen_experience_unified_autoreg(
             "outcome": torch.tensor(p_all["outcome"].to_numpy(), dtype=torch.float32),
             "steps_to_terminal": torch.tensor(
                 p_all["steps_to_terminal"].to_numpy(), dtype=torch.float32
+            ),
+            "target_sel_minimax": torch.tensor(
+                np.stack(p_all["target_sel_minimax"].to_list()),
+                dtype=torch.float32,
+            ),
+            "target_sel_minimax_mask": torch.tensor(
+                np.stack(p_all["target_sel_minimax_mask"].to_list()),
+                dtype=torch.float32,
             ),
         },
         batch_size=[p_all.shape[0]],
@@ -1268,6 +1373,7 @@ def DQN_training_step_decoupled_autoreg(
         DECOUPLED_TARGET_TD_PLACE_MC_SELECT,
         DECOUPLED_TARGET_MC_BOTH,
         DECOUPLED_TARGET_TD_PLACE_TD_SELECT,
+        DECOUPLED_TARGET_TD_PLACE_MINIMAX_SELECT,
     ):
         raise ValueError(f"Unknown decoupled target style {TARGET_STYLE}")
 
@@ -1334,6 +1440,22 @@ def DQN_training_step_decoupled_autoreg(
     expected_select = (
         GAMMA ** exp_batch["steps_to_terminal"][select_mask]
     ) * exp_batch["outcome"][select_mask]
+
+    if TARGET_STYLE == DECOUPLED_TARGET_TD_PLACE_MINIMAX_SELECT:
+        # T-series: full per-piece minimax-oracle supervision for Q_select.
+        # Override the scalar (state_select_values, expected_select) pair with
+        # the FULL 16-d Q_select vector + per-piece minimax target + legality
+        # mask. Caller distinguishes scalar/vector mode by len(return_tuple).
+        state_select_values = q_select_all[select_mask]
+        expected_select = exp_batch["target_sel_minimax"][select_mask]
+        select_loss_mask = exp_batch["target_sel_minimax_mask"][select_mask]
+        return (
+            state_place_values,
+            expected_place,
+            state_select_values,
+            expected_select,
+            select_loss_mask,
+        )
 
     if TARGET_STYLE == DECOUPLED_TARGET_TD_PLACE_TD_SELECT:
         # Ng_auxSelect: replace MC target for Q_select with a 1-step Q_place
