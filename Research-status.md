@@ -18,16 +18,34 @@ result paragraphs here under "Recent results" when a sweep concludes.
   unified 32-d phase-stable aux (`[offered_one_hot ; available_mask]`) and no
   phase embedding. 7pp behind ME(2) on WR; standing trade for SAE-able activations.
 - **Candidate replacement (pending confirmation):**
-  `Sa_archScan(3)0512_ARCH_S4_uniform512` — 73.5% WR vs `bot_loss-BT`, 86.4%
-  vs `bot_random` (curve still rising at 5000 epochs). Matches ME(2) on WR
-  with the unified-aux substrate; closes the 7pp interp tax. Promote after
-  a 10k-epoch confirmation. Full write-up: `docs/diary/series-S.md`.
+  `Ta_minimaxSelect(1)0514_DEPTH_2` — **80.3% WR vs `bot_loss-BT`, 90.2%
+  vs `bot_random`** (peaks 81.5% / 90.9%, trend still rising at +3.6 pp/1000ep
+  when training was truncated at epoch 4000). Sa(3) substrate + minimax
+  depth=2 supervised target on Q_select with `Q_place` unchanged. Q_select
+  remains "saturated" under the match-outcome-conditioned Δ metric (Δ ≈
+  +0.02); WR gain runs through the place head. Promotion contingent on a
+  clean 5000-epoch re-run and a 10k confirmation. Full write-up:
+  `docs/diary/series-T.md`.
+- **Prior candidate (now superseded):** `Sa_archScan(3)0512_ARCH_S4_uniform512`
+  — 73.5% WR; held as interpretability substrate of record under Ta(1)
+  since Ta(1) uses the Sa(3) trunk.
 
-## Current Open Problem — Q_select saturation
+## Current Open Problem — Q_select "saturation"
 
-`Q_select` collapses near −1 across every architecture and target style we
-have tried (M, N, O, Q, R, S) — the place head carries WR while the select
-head contributes ~0 to value separation. Triangulation as of 2026-05-14:
+> **[AI-REASONED PROVISIONAL FRAMING — 2026-05-18]** The framing of this
+> section was revised after the Ta-series results. Direct measurements
+> (numbers, gate pass/fail) are reliable; mechanism stories are inferential
+> and may be biased. Future readers: verify with
+> [`analysis/qselect_diagnostics/PLAN.md`](analysis/qselect_diagnostics/PLAN.md)
+> before treating the inferred conclusions as load-bearing.
+
+`Q_select` shows ~0 winners-minus-losers Δ across every architecture and
+target style we have tried (M, N, O, Q, R, S, T) — the place head carries
+WR while the select head contributes ~0 to value separation **under the
+current match-outcome-conditioned metric** (`QuartoRL/results_io.py:192-214`).
+
+Whether this represents a genuine learning failure or a measurement
+artefact is now open. Triangulation as of 2026-05-18:
 
 - **Head only (Pa_frozenTrunkSelect):** freezing the ME(2) trunk and retraining
   only `fc2_select` lifts the winners-mean by ≈ +0.20, not the ≥ +0.40 the gate
@@ -41,29 +59,41 @@ head contributes ~0 to value separation. Triangulation as of 2026-05-14:
   buys a marginal Q_select Δ (≤ +0.04) at a one-way cost in WR.
   **Gradient-starvation rejected.**
 - **Structural trunk variants (Sa_archScan):** deeper conv (Sa(1)) produced
-  the largest Q_select Δ on record (+0.170), but as a numeric statistic on
-  outcome means — *not* visible plate separation in the qv heatmaps — and
-  with a 30pp WR cost (curve still rising at 5000 epochs). Wider/uniform
-  FC (Sa(3)) matched ME(2) WR with the unified-aux substrate but produced
-  no Q_select gain.
+  the largest numeric Q_select Δ (+0.170) but **no visible plate separation
+  in the qv heatmaps**, with a 30pp WR cost. Re-interpreted 2026-05-18 as
+  a likely artefact of a failing run rather than evidence that deeper conv
+  helps Q_select. Wider/uniform FC (Sa(3)) matched ME(2) WR with the
+  unified-aux substrate; no Q_select gain.
+- **Minimax-oracle distillation (Ta-series):** clean per-piece minimax
+  targets at depth=2 drove `loss_select` to **0.055** (well below the 0.24
+  R/S floor — proving the floor was a target-noise artefact) **and** lifted
+  WR to **80.3%** (new champion candidate). But Q_select Δ stayed ≈0 under
+  the existing metric. Three live hypotheses for why (see below).
 
-Two triangulated conclusions:
+Triangulated **direct** observations:
 
-1. The select head responds slightly to trunk capacity changes but the
-   `loss_select` floor is invariant to weighting, architecture, and head-only
-   retraining. The floor lives in the **targets**, not the gradient or the
-   architecture.
-2. Under `td_place_mc_select` with `REWARD_FUNCTION="final"`, the Q_select
-   target is the MC return from a select action — player-perspective ±1
-   discounted from terminal. `Q_select=−1` correctly labels piece-gives that
-   directly caused a loss; `Q_select=+1` labels selects up to 6+ moves
-   before an eventual win, where the credit is buried under many subsequent
-   decisions. The label distribution conflates decisive and incidental
-   selects.
+1. `loss_select` floor under MC return targets (0.24) was indeed target
+   noise. Confirmed by Ta: clean targets are fittable.
+2. WR can be lifted to ≥80% via clean select-side gradient even when the
+   Q_select head output remains uninformative under the current Δ metric.
+   The trunk benefits from supervised auxiliary signal even when the head
+   output looks flat.
 
-Next direction: **minimax-oracle labels for the select head**
-(supervised distillation of `Q_select`, RL unchanged for `Q_place`). See
-[`docs/diary/2026-05-14_qselect-target-rethink.md`](docs/diary/2026-05-14_qselect-target-rethink.md).
+**[INFERENTIAL]** Three live hypotheses for the Δ ≈ 0 observation:
+
+- **H1 — metric artefact.** Most Quarto select decisions are functionally
+  neutral; match-outcome-conditioned Δ averages over them. A network
+  correctly outputting "≈0 except in forcing positions" looks saturated.
+- **H2 — signal sparsity.** Only a small fraction of buffer select rows
+  carry non-trivial oracle targets; α reweighting (Ra) cannot help per-row.
+- **H3 — multitask interference.** Shared trunk converges to dense-gradient
+  Q_place features; Q_select head cannot invert them on sparse-signal
+  events.
+
+Next direction: **diagnostic suite, not another architecture swing.** See
+[`analysis/qselect_diagnostics/PLAN.md`](analysis/qselect_diagnostics/PLAN.md).
+Sb_hybridTrunk and similar architectural hedges are deprioritised pending
+at least one of D1/D2/D3 returning evidence for an architectural mechanism.
 
 ## Code-version letters (active and queued)
 
@@ -80,10 +110,26 @@ Next direction: **minimax-oracle labels for the select head**
 | P | frozen-trunk select | M-series | done (negative) — `series-P.md` |
 | Q | unified + aux legality + no mask | `QuartoCNNUnifiedNoMask` + `Quarto_unified_nomask_bot` | done (gate failed) — `series-Q.md`, `docs/diary/2026-05-11_qc-no-mask.md` |
 | R | per-head loss weighting | OA-family | done (gate failed) — `series-R.md` |
-| S | structural trunk variants | OA-family | done (mixed) — `series-S.md`; Sa(3) candidate new interp champion |
-| **T** | **minimax-oracle select target** | Sa(3) | **in flight** — `series-T.md`; design note `docs/diary/2026-05-14_qselect-target-rethink.md` |
+| S | structural trunk variants | OA-family | done (mixed) — `series-S.md`; Sa(1) "+0.170 Δ" re-interpreted as artefact 2026-05-18 |
+| T | minimax-oracle select target | Sa(3) | done — `series-T.md`; Ta(1) = **WR champion candidate**, but Q_select metric still flat |
+| **U?** | **Q_select diagnostics (not a training series)** | n/a | **active** — `analysis/qselect_diagnostics/PLAN.md` (D1/D2/D3) |
 
 ## Recent results
+
+### Ta_minimaxSelect — 2026-05-18 (3 runs)
+
+| Run | Param | Epochs | `loss_select` | Q_sel Δ | Q_pl Δ | WR vs BT | WR vs random |
+|---|---|---|---|---|---|---|---|
+| Ta(1) | DEPTH=2, 16-d masked | 4000 (truncated) | **0.055** | +0.019 | +0.514 | **80.3%** | 90.2% |
+| Ta(2) | DEPTH=1, 16-d masked | 5000 | **5e-6** | +3e-5 | +0.335 | 71.5% | 85.0% |
+| Ta(3) | DEPTH=2, scalar | 4000 (truncated) | 0.044 | +0.002 | +0.591 | 74.9% | 87.0% |
+
+Gates: `loss_select` ≤ 0.10 **PASS everywhere** (target-noise floor broken).
+Q_select Δ ≥ +0.40 **FAIL everywhere** (≈0). WR ≥ 70% **PASS everywhere**;
+Ta(1) is new champion candidate. **[INFERENTIAL]** Pre-registered "trunk
+can't represent piece × board" routing to Sb hybrid re-examined and
+deprioritised — see `series-T.md` → Result section. Tb_depth4 and
+Td_oracleCache dropped.
 
 ### Sa_archScan — 2026-05-12 (5000 epochs each, 3 runs)
 
@@ -138,29 +184,34 @@ Saturation is **not** a head-level pathology. Full write-up in
 
 ## Forward queue
 
-1. **Ta_minimaxSelect(1)** — *in flight.* `USE_MINIMAX_SELECT_TARGET=True`
-   in `trainRL.py` switches the SELECT head from MC return to per-piece
-   minimax labels (depth 2) on the Sa(3) substrate; `Q_place` continues
-   under `td_place_mc_select`. Targets are captured at experience-generation
-   time (frozen in buffer with the policy of that moment). Gate:
-   `loss_select` ≤ 0.10, Q_select Δ ≥ +0.40, WR vs `bot_loss-BT` ≥ 70%.
-   Train script: `train_scripts/Ta_minimaxSelect(1)0514_DEPTH_2.py`.
-   Estimated oracle overhead: ≈ 10–20 hours / 5k-epoch run; cache & depth=1
-   mitigations on deck. Series doc: [`docs/diary/series-T.md`](docs/diary/series-T.md).
-2. **Sa(3) confirmation run** — re-run `Sa_archScan(3)0512_ARCH_S4_uniform512`
-   at 10k epochs (curve still rising at 5k) to lock the interpretability-
-   champion promotion. Cheap.
-3. **Tb_depth4** — Ta variant with `MINIMAX_SELECT_DEPTH=4`. Test whether
-   deeper lookahead breaks the depth-2 information ceiling (most depth-2
-   non-forced positions return 0). Contingent on Ta(1) outcome.
-4. **Sb_hybridTrunk** — Sa(3) uniform-512 FC with Sa(1) deeper conv stack on
-   top. Tests whether the WR carrier (Sa(3) via Q_place) and the numeric
-   Q_select gain (Sa(1)) compose. Orthogonal to T; runs in parallel.
-5. **Rb_schedAlpha** — time-varying (α_place, α_select). Start (1.0, 1.0)
-   for ~2000 epochs, then ramp α_select. Tests whether a warm Q_place trunk
-   can absorb select-loss pressure that the cold-start Ra grid could not.
-   Lowest priority — Ra's `loss_select` floor is targets-side evidence; Rb
-   is the optimisation-side hedge.
+1. **Q_select diagnostic suite (D1/D2/D3)** — *active.* Three non-training
+   diagnostics under `analysis/qselect_diagnostics/` that distinguish
+   H1 (metric artefact) / H2 (signal sparsity) / H3 (multitask interference)
+   for the long-standing "Q_select saturation" observation. **D1 first**
+   (cheapest, falsifies the most). Implementation plan:
+   [`analysis/qselect_diagnostics/PLAN.md`](analysis/qselect_diagnostics/PLAN.md).
+2. **Ta(1) clean re-run + 10k confirmation** — the existing Ta(1) checkpoint
+   was truncated at epoch 4000 with WR still rising at +3.6 pp/1000ep.
+   Re-run to 5000 (clean) then 10k (confirmation) before formally promoting
+   over ME(2) as overall champion. Cheap; reuses the existing train script.
+3. **Sa(3) confirmation run** — re-run `Sa_archScan(3)0512_ARCH_S4_uniform512`
+   at 10k epochs to lock the interpretability-substrate-of-record claim
+   independently of Ta(1). Lower priority since Ta(1) already uses Sa(3).
+4. **Rb_schedAlpha** — time-varying (α_place, α_select). Tests whether a
+   warm Q_place trunk can absorb select-loss pressure that the cold-start
+   Ra grid could not. Lowest priority — Ra's `loss_select` floor was
+   targets-side evidence (now reframed by Ta), so Rb is an
+   optimisation-side hedge with less specific motivation than before.
+
+**Dropped 2026-05-18:**
+
+- **Tb_depth4** — Ta(1) at depth=2 already produced fittable targets and
+  Δ ≈ 0 remained; deeper lookahead does not address H1/H2/H3.
+- **Td_oracleCache** — Ta(2) showed depth=1 collapses to zero, so caching
+  at that depth is pointless; depth=2 ran without it.
+- **Sb_hybridTrunk** — built on the Sa(1) "+0.170 Δ" inference that the
+  Ta-series re-reading classifies as likely artefact. Revisit only if a
+  diagnostic returns evidence for an architectural mechanism.
 
 All runs use the per-head loss / grad logging and JSONL emission from
 2026-05-12; runs trained after 2026-05-14 also receive `wr_trend` slope
@@ -196,6 +247,6 @@ Two-part name: **`XY_description`**.
 4. **Endgame anchor buffer (ENDGAME_FRACTION=0.5, N_LAST_STATES_ENDGAME=2)** is the single change that unlocked 73% WR (M-series → ME).
 5. **Loss reweighting (R) is rejected as a fix for Q_select saturation.** `loss_select` has a floor near 0.24 invariant to a 30× swing in α_select / α_place; reweighting buys Q_select Δ ≤ +0.04 at a one-way WR cost. Gradient starvation is not the mechanism.
 6. **Structural trunk changes (S) close the unified-aux WR tax but not Q_select saturation.** Sa(3) matches ME(2) WR with the unified-aux substrate (+7pp over OA(1)) — new interpretability champion candidate. Sa(1) deepConv produced the largest numeric Q_select Δ on record (+0.170) but with no visible plate separation and a WR collapse. The select-side gap is not where deeper trunks alone close it.
-7. **The next candidate is target noise on Q_select.** Under `td_place_mc_select` + `REWARD_FUNCTION="final"`, Q_select=+1 is the MC return label on selects that occurred up to 6+ moves before the eventual win — credit assignment buried under subsequent decisions. Proposed remedy: minimax-oracle labels for the select head (T-series). Design note: `docs/diary/2026-05-14_qselect-target-rethink.md`.
+7. **Target noise (T-series) was half the story.** Clean minimax targets drove `loss_select` from the 0.24 R/S floor down to 0.055 — confirming the floor was target noise. But `Q_select` Δ stayed ≈0 under the match-outcome metric, and Ta(1) became a new WR champion candidate (80.3%) *via the place head*, not via a now-discriminative Q_select. The "Q_select saturation" open problem is now **under-determined between metric artefact (H1), buffer signal sparsity (H2), and multitask interference (H3)** — see `analysis/qselect_diagnostics/PLAN.md`. **[INFERENTIAL — written 2026-05-18 by an AI agent revisiting its own prior claims; verify with diagnostics before treating as load-bearing.]**
 
 For each of these, the originating series file in `docs/diary/` carries the full evidence.

@@ -39,6 +39,11 @@ DECOUPLED_TARGET_TD_PLACE_TD_SELECT = "td_place_td_select"
 # replay). Requires `target_sel_minimax` and `target_sel_minimax_mask`
 # fields in the batch.
 DECOUPLED_TARGET_TD_PLACE_MINIMAX_SELECT = "td_place_minimax_select"
+# T-series Tc variant: same minimax oracle, but supervise only the scalar
+# Q_select value at the chosen piece (matches the standard scalar 4-tuple
+# return shape used by all other styles). Diagnostic — isolates "oracle
+# replaces MC noise" from "oracle gives 16× more signal per state".
+DECOUPLED_TARGET_TD_PLACE_MINIMAX_SELECT_SCALAR = "td_place_minimax_select_scalar"
 DISCOUNT_REWARD_GAMMA = 0.8
 
 PHASE_PLACE = 0
@@ -1374,6 +1379,7 @@ def DQN_training_step_decoupled_autoreg(
         DECOUPLED_TARGET_MC_BOTH,
         DECOUPLED_TARGET_TD_PLACE_TD_SELECT,
         DECOUPLED_TARGET_TD_PLACE_MINIMAX_SELECT,
+        DECOUPLED_TARGET_TD_PLACE_MINIMAX_SELECT_SCALAR,
     ):
         raise ValueError(f"Unknown decoupled target style {TARGET_STYLE}")
 
@@ -1440,6 +1446,22 @@ def DQN_training_step_decoupled_autoreg(
     expected_select = (
         GAMMA ** exp_batch["steps_to_terminal"][select_mask]
     ) * exp_batch["outcome"][select_mask]
+
+    if TARGET_STYLE == DECOUPLED_TARGET_TD_PLACE_MINIMAX_SELECT_SCALAR:
+        # Tc diagnostic: keep the scalar 4-tuple shape (Q_select at chosen
+        # piece vs minimax target at chosen piece). Isolates "oracle replaces
+        # MC noise" from "oracle gives 16× more signal per state".
+        expected_select = (
+            exp_batch["target_sel_minimax"][select_mask]
+            .gather(1, action[select_mask].unsqueeze(1))
+            .squeeze(1)
+        )
+        return (
+            state_place_values,
+            expected_place,
+            state_select_values,
+            expected_select,
+        )
 
     if TARGET_STYLE == DECOUPLED_TARGET_TD_PLACE_MINIMAX_SELECT:
         # T-series: full per-piece minimax-oracle supervision for Q_select.

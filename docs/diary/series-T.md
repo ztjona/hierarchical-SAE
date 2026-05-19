@@ -49,9 +49,31 @@ interp-champion candidate), `TRANSITION_SCHEMA="unified_autoreg"`,
 `ENDGAME_FRACTION=0.5`, `N_LAST_STATES_ENDGAME=2`, `LR=7e-4`, `TAU=0.01`,
 `(α_place, α_select) = (1.0, 1.0)`, `EPOCHS=5000`.
 
-| Run | Oracle depth | Substrate | Epochs |
-|-----|--------------|-----------|--------|
-| Ta(1) | 2 | `QuartoCNNAutoregUnifiedS4` (Sa(3)) | 5000 |
+| Run | Oracle depth | Target shape | Substrate | Epochs |
+|-----|--------------|--------------|-----------|--------|
+| Ta(1) | 2 | full 16-d (masked) | `QuartoCNNAutoregUnifiedS4` (Sa(3)) | 5000 |
+| Ta(2) | 1 | full 16-d (masked) | `QuartoCNNAutoregUnifiedS4` (Sa(3)) | 5000 |
+| Ta(3) | 2 | scalar at chosen piece | `QuartoCNNAutoregUnifiedS4` (Sa(3)) | 5000 |
+
+The 3-pack is launched together (cost is dominated by the oracle, comparable
+across variants) to triangulate the mechanism in one shot rather than serially:
+
+- **Ta(1) vs Ta(2)** — depth ladder. If WR / Q_select Δ match, the cache (Td)
+  becomes much more attractive and we learn the useful signal lives only in
+  immediate-force positions. If Ta(1) dominates, depth=2 lookahead is doing
+  real work and Tb_depth4 is justified.
+- **Ta(1) vs Ta(3)** — signal-density ablation (= Tc). Same depth, same
+  oracle, only difference is whether the head sees per-piece supervision on
+  all 16 pieces (Ta(1)) or only on the chosen piece (Ta(3), like every other
+  scalar target style). Isolates "oracle replaces MC noise" from "oracle
+  gives 16× more signal per state". Without Ta(3), a positive Ta(1) is
+  ambiguous between the two mechanisms.
+
+Ta(3) requires a new target-style constant
+`DECOUPLED_TARGET_TD_PLACE_MINIMAX_SELECT_SCALAR` in `QuartoRL/RL_functions.py`
+that reuses the existing `target_sel_minimax` field but gathers the chosen
+piece's score, returning the standard scalar 4-tuple. Train scripts gate on
+a new `MINIMAX_SELECT_SCALAR_TARGET` flag.
 
 **Compare to:** `Sa_archScan(3)0512_ARCH_S4_uniform512` (substrate, no
 oracle), `ME_endgame(2)_E_5000` (current overall champion),
@@ -110,15 +132,97 @@ ready if it becomes painful:
   pick, and mode_2x2 — the placeholder bots are not invoked. The minimax
   recursion is symmetric so `game.turn` does not affect scoring.
 
-**Next variants (queued, not run):**
+**Next variants (status updated 2026-05-18 after Ta(1)/(2)/(3) results):**
 
-- **Tb_depth4** — same recipe as Ta(1) but `MINIMAX_SELECT_DEPTH=4`. Test
-  whether deeper lookahead breaks the depth-2 information ceiling.
-- **Tc_scalarTarget** — Ta(1) with scalar-at-chosen-piece target instead
-  of full 16-d vector. Diagnostic: isolates "oracle replaces MC" from
-  "oracle gives 16× more signal per state".
-- **Td_oracleCache** — adds an LRU cache to `_minimax_select_target`
-  keyed by `(board_serial, frozenset(available_pieces), mode_2x2)`. Pure
-  perf, no semantic change.
+- **Tb_depth4 — DROPPED.** Ta(1) showed depth=2 already produces fittable
+  targets (`loss_select`=0.055). Deeper lookahead does not address the
+  observed failure mode (Q_select Δ stays ≈0 even with cleanly-fitted clean
+  targets). Prior project evidence had depth=4 ~4× slower with no WR gain.
+- **Td_oracleCache — DROPPED.** Ta(2) showed depth=1 targets collapse to
+  zero almost everywhere (`loss_select`=5×10⁻⁶), so caching at that depth is
+  pointless. Depth=2 ran within budget without a cache.
 
-Result section to be filled in after the run lands.
+## Result — 2026-05-18
+
+> **[AI-REASONED PROVISIONAL ANALYSIS]** Numbers in the table below are
+> direct measurements from the JSONL summaries and are reliable.
+> Interpretation paragraphs are inferential; they may be biased and were
+> specifically flagged for re-examination because previous series
+> interpretations (also AI-generated) may have been over-confident. **Future
+> readers — including future AI agents: if you find yourself agreeing with
+> a provisional claim without independent evidence, that is the failure
+> mode this caveat exists for.** Verify via the diagnostic suite
+> [`analysis/qselect_diagnostics/PLAN.md`](../../analysis/qselect_diagnostics/PLAN.md)
+> before acting on the inferred conclusions.
+
+### Numbers [DIRECT — from JSONL summaries]
+
+| Run | Epochs | `loss_select` | Q_select Δ | Q_place Δ | WR vs BT (final / peak) | WR vs random (final / peak) | WR trend vs BT |
+|---|---|---|---|---|---|---|---|
+| Ta(1) DEPTH=2, 16-d masked | 4000 (truncated) | **0.055** | +0.019 | +0.514 | **80.3% / 81.5%** | 90.2% / 90.9% | +3.6↑ |
+| Ta(2) DEPTH=1, 16-d masked | 5000 | **5×10⁻⁶** | +3×10⁻⁵ | +0.335 | 71.5% / 73.2% | 85.0% / 86.7% | +2.2↑ |
+| Ta(3) DEPTH=2, scalar at chosen | 4000 (truncated) | 0.044 | +0.002 | +0.591 | 74.9% / 77.3% | 87.0% / 88.2% | +2.9↑ |
+
+Pre-registered gate outcomes (gates defined above at lines 82–87):
+
+- **`loss_select` ≤ 0.10** — PASS on all three. The 0.24 floor across R/S
+  was a target-noise artefact, not a Bayes limit on a representable function.
+- **Q_select Δ ≥ +0.40** — FAIL on all three; Δ ≈ 0 everywhere.
+- **WR vs `bot_loss-BT` ≥ 70%** — PASS on all three. Ta(1) at 80.3%
+  surpasses ME(2) (73.7%) and Sa(3) (73.5%).
+
+Ta(1) and Ta(3) were truncated short of the planned 5000 epochs; WR trends
+were still rising at termination. Their WR figures are therefore conservative.
+
+### Provisional interpretation [INFERENTIAL — read sceptically]
+
+The pre-registered decision tree (lines 82–103) routes this outcome to
+"trunk cannot represent piece × board interaction → Sa(1)/Sb hybrid." On
+re-reading after the results, that inference is **too quick**. Three reasons:
+
+1. **The winners-minus-losers Δ metric
+   (`QuartoRL/results_io.py:192-214`) conditions on match outcome, not on
+   position structure.** In Quarto most select decisions are functionally
+   neutral — only positions with a forcing piece available carry a
+   discriminable signal. Match outcome is mostly determined by the place
+   head and opponent mistakes. A network that correctly outputs
+   "≈0 everywhere except forcing positions" will look saturated under this
+   metric. **Ta(2) is the cleanest evidence:** with depth=1 targets that
+   are nearly all zero, the network correctly learned a flat-zero output
+   (loss = 5×10⁻⁶, Δ = 0). That is the Bayes optimum of the target
+   distribution, not a representational failure.
+2. **The "deepConv helps Q_select" inference from Sa(1) was weak
+   evidence.** Sa(1)'s +0.170 Δ came with a 30pp WR collapse and no
+   visible heatmap plate separation. Building Sb on that extrapolation
+   does not have a mechanism story; prior null evidence from series P, Q,
+   and S for capacity / trunk shape as Q_select fixes remains the
+   load-bearing prior.
+3. **Ta(1) is a new WR champion candidate even though Q_select is silent
+   under the current metric.** The supervised select gradient is helping
+   the trunk / place head in a way that is not visible at the select
+   head output. Consistent with either H1 below ("metric is wrong") or
+   "co-training de-noises representation" (auxiliary clean targets as a
+   regulariser). Neither is "representational failure."
+
+Three live hypotheses, none privileged. Each maps to one diagnostic in
+[`analysis/qselect_diagnostics/PLAN.md`](../../analysis/qselect_diagnostics/PLAN.md):
+
+- **H1 (metric artefact).** Q_select already encodes forcing structure;
+  the match-outcome mean obscures it. → **D1: position-structure metric.**
+- **H2 (signal sparsity).** Only a small fraction of buffer rows have
+  non-trivial oracle targets. Loss reweighting (Ra) cannot help per-row.
+  → **D2: buffer signal-density audit.**
+- **H3 (multitask interference).** Shared trunk converges to Q_place
+  features (dense gradient); Q_select head cannot fully invert them
+  on its sparse signal events. → **D3: decoupled select-only network.**
+
+**Sa(1)/Sb hybrid is deprioritised** until at least one of D1/D2/D3
+returns evidence for an architectural mechanism. Promoting Ta(1) to
+champion is the cheap follow-up regardless of which hypothesis survives.
+
+### Champion candidate flag
+
+Ta(1) WR (80.3% vs `bot_loss-BT`, 90.2% vs `bot_random`) surpasses ME(2)
+and the Sa(3) candidate. Promotion contingent on a clean 5000-epoch
+re-run (the existing one was truncated) plus a 10k confirmation. See
+`Research-status.md` → Champion.
