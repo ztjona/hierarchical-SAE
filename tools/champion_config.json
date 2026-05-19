@@ -1,0 +1,48 @@
+{
+    "champion": "Ta_minimaxSelect_1",
+    "default_opponents": [
+        "random",
+        "loss_BT",
+        "Aa_replay",
+        "ME_endgame",
+        "Sa_archScan_3"
+    ],
+    "bots": {
+        "Ta_minimaxSelect_1": {
+            "path": "CHECKPOINTS/Ta_minimaxSelect(1)0514_DEPTH_2/20260516_1452-Ta_minimaxSelect(1)0514_DEPTH_2_E_4350.pt",
+            "model_class": "QuartoCNNAutoregUnifiedS4",
+            "bot_class": "Quarto_unified_bot",
+            "name": "Ta_minimaxSelect(1) [depth=2, E=4350]"
+        },
+        "Sa_archScan_3": {
+            "path": "CHECKPOINTS/Sa_archScan(3)0512_ARCH_S4_uniform512/20260514_0815-Sa_archScan(3)0512_ARCH_S4_uniform512_E_5000.pt",
+            "model_class": "QuartoCNNAutoregUnifiedS4",
+            "bot_class": "Quarto_unified_bot",
+            "name": "Sa_archScan(3) [S4]"
+        },
+        "ME_endgame": {
+            "path": "CHECKPOINTS/ME_endgame(2)0429_ENDGAME_FRACTION_0.5/20260507_0829-ME_endgame(2)0429_ENDGAME_FRACTION_0.5_E_5000.pt",
+            "model_class": "QuartoCNNAutoreg",
+            "bot_class": "Quarto_autoreg_bot",
+            "name": "ME_endgame(2)"
+        },
+        "Aa_replay": {
+            "path": "CHECKPOINTS/Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8/20260227_1103-Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8_E_5000.pt",
+            "model_class": "QuartoCNN_uncoupled",
+            "bot_class": "Quarto_bot",
+            "name": "Aa_replay(2)"
+        },
+        "loss_BT": {
+            "path": "CHECKPOINTS/LOSS_APPROACHs_1212-2_only_select/20251212_2206-LOSS_APPROACHs_1212-2_only_select_E_1034.pt",
+            "model_class": "QuartoCNN_uncoupled",
+            "bot_class": "Quarto_bot",
+            "name": "Loss_BT"
+        },
+        "random": {
+            "path": "CHECKPOINTS/EXP_id03/20250922_1247-EXP_id03_epoch_0000.pt",
+            "model_class": "QuartoCNN",
+            "bot_class": "Quarto_bot",
+            "name": "Random Baseline"
+        }
+    }
+}

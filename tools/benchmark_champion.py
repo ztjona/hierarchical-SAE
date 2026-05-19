@@ -3,25 +3,24 @@
 """Benchmark the current champion against previous champions and baselines.
 
 Usage:
-  benchmark_champion.py [--matches=<n>] [--output=<file>] [--opponents=<list>] [--verbose]
+  benchmark_champion.py [--config=<file>] [--matches=<n>] [--output=<file>] [--opponents=<list>] [--verbose]
   benchmark_champion.py -h | --help
 
 Options:
+  --config=<file>     Path to champion config JSON. Defaults to champion_config.json
+                      in the same directory as this script.
   --matches=<n>       Number of matches per direction [default: 500].
   --output=<file>     Output JSONL file path [default: champion-results.jsonl].
-  --opponents=<list>  Comma-separated opponents to benchmark against
-                      [default: random,loss_BT,Aa_replay,ME_endgame].
+  --opponents=<list>  Comma-separated opponent keys from the config to benchmark against.
+                      Defaults to the 'default_opponents' list in the config file.
   --verbose           Print detailed output during games.
   -h --help           Show this screen.
-
-Available opponents: random, loss_BT, Aa_replay, ME_endgame
 """
 
 import sys
 import json
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any
 from docopt import docopt
 
 # Ensure workspace root is on path when running from tools/
@@ -37,86 +36,66 @@ from models.CNN_uncoupled import QuartoCNN as QuartoCNN_uncoupled
 from models.CNN_autoreg import QuartoCNNAutoreg
 from models.CNN_autoreg_sa import QuartoCNNAutoregUnifiedS4
 
-# Checkpoint paths
-CHECKPOINTS = {
-    "champion": {
-        "path": "CHECKPOINTS//Sa_archScan(3)0512_ARCH_S4_uniform512//20260514_0815-Sa_archScan(3)0512_ARCH_S4_uniform512_E_5000.pt",
-        "class": QuartoCNNAutoregUnifiedS4,
-        "bot_class": Quarto_unified_bot,
-        "name": "Sa_archScan(3) [S4]",
-    },
-    "random": {
-        "path": "CHECKPOINTS//EXP_id03//20250922_1247-EXP_id03_epoch_0000.pt",
-        "class": QuartoCNN,
-        "bot_class": Quarto_bot,
-        "name": "Random Baseline",
-    },
-    "loss_BT": {
-        "path": "CHECKPOINTS//LOSS_APPROACHs_1212-2_only_select//20251212_2206-LOSS_APPROACHs_1212-2_only_select_E_1034.pt",
-        "class": QuartoCNN_uncoupled,
-        "bot_class": Quarto_bot,
-        "name": "Loss_BT",
-    },
-    "Aa_replay": {
-        "path": "CHECKPOINTS//Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8//20260227_1103-Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8_E_5000.pt",
-        "class": QuartoCNN_uncoupled,
-        "bot_class": Quarto_bot,
-        "name": "Aa_replay(2)",
-    },
-    "ME_endgame": {
-        "path": ".//CHECKPOINTS//ME_endgame(2)0429_ENDGAME_FRACTION_0.5//20260507_0829-ME_endgame(2)0429_ENDGAME_FRACTION_0.5_E_5000.pt",
-        "class": QuartoCNNAutoreg,
-        "bot_class": Quarto_autoreg_bot,
-        "name": "ME_endgame(2)",
-    },
+# Registry mapping string names used in champion_config.json to actual classes.
+# Add a new entry here whenever a new model or bot class is introduced.
+_MODEL_REGISTRY = {
+    "QuartoCNN": QuartoCNN,
+    "QuartoCNN_uncoupled": QuartoCNN_uncoupled,
+    "QuartoCNNAutoreg": QuartoCNNAutoreg,
+    "QuartoCNNAutoregUnifiedS4": QuartoCNNAutoregUnifiedS4,
 }
 
+_BOT_REGISTRY = {
+    "Quarto_bot": Quarto_bot,
+    "Quarto_unified_bot": Quarto_unified_bot,
+    "Quarto_autoreg_bot": Quarto_autoreg_bot,
+}
 
-def load_bot(checkpoint_key: str) -> tuple:
-    """Load a bot from checkpoint."""
-    config = CHECKPOINTS[checkpoint_key]
-    bot = config["bot_class"](
-        model_path=config["path"],
-        model_class=config["class"],
+DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent / "champion_config.json"
+
+
+def load_config(config_path: Path) -> dict:
+    with open(config_path) as f:
+        return json.load(f)
+
+
+def load_bot(bot_key: str, config: dict) -> tuple:
+    """Load a bot from a config dict entry."""
+    bot_cfg = config["bots"][bot_key]
+    model_class = _MODEL_REGISTRY[bot_cfg["model_class"]]
+    bot_class = _BOT_REGISTRY[bot_cfg["bot_class"]]
+    bot = bot_class(
+        model_path=bot_cfg["path"],
+        model_class=model_class,
         deterministic=False,
         temperature=0.1,
     )
-    return bot, config["name"]
+    return bot, bot_cfg["name"]
 
 
 def benchmark_champion(
+    config: dict,
     matches: int = 500,
-    opponents: list = None,
+    opponents: list | None = None,
     output_path: str = "champion-results.jsonl",
     verbose: bool = False,
 ) -> None:
-    """
-    Benchmark the champion against specified opponents.
+    resolved_opponents: list = opponents if opponents is not None else config.get("default_opponents", [])
 
-    Args:
-        matches: Number of matches to play in each direction
-        opponents: List of opponent keys (default: all except champion)
-        output_path: Path to save results
-        verbose: Print detailed output
-    """
-    if opponents is None:
-        opponents = ["random", "loss_BT", "Aa_replay", "ME_endgame"]
-
-    # Load champion
-    champion_bot, champion_name = load_bot("champion")
+    champion_key = config["champion"]
+    champion_bot, champion_name = load_bot(champion_key, config)
     print(f"\n{'='*60}")
     print(f"Benchmarking Champion: {champion_name}")
     print(f"{'='*60}")
     print(f"Number of matches per pairing: {matches}")
     print(f"Output: {output_path}")
-    print(f"Opponents: {opponents}")
+    print(f"Opponents: {resolved_opponents}")
     print(f"{'='*60}\n")
 
     results = []
 
-    # Benchmark against each opponent
-    for opp_key in opponents:
-        opponent_bot, opponent_name = load_bot(opp_key)
+    for opp_key in resolved_opponents:
+        opponent_bot, opponent_name = load_bot(opp_key, config)
 
         print(f"Playing vs {opponent_name}...")
 
@@ -214,20 +193,26 @@ def benchmark_champion(
 def main():
     args = docopt(__doc__)
 
+    config_path = Path(args["--config"]) if args["--config"] else DEFAULT_CONFIG_PATH
+    config = load_config(config_path)
+
     matches = int(args["--matches"])
     output_path = args["--output"]
-    opponents = [o.strip() for o in args["--opponents"].split(",")]
     verbose = args["--verbose"]
 
-    # Validate opponents
-    valid_opponents = set(CHECKPOINTS.keys()) - {"champion"}
-    for opp in opponents:
-        if opp not in valid_opponents:
-            print(f"Error: Unknown opponent '{opp}'")
-            print(f"Available opponents: {', '.join(sorted(valid_opponents))}")
-            return
+    if args["--opponents"]:
+        opponents = [o.strip() for o in args["--opponents"].split(",")]
+        valid_opponents = set(config["bots"].keys()) - {config["champion"]}
+        for opp in opponents:
+            if opp not in valid_opponents:
+                print(f"Error: Unknown opponent '{opp}'")
+                print(f"Available opponents: {', '.join(sorted(valid_opponents))}")
+                return
+    else:
+        opponents = None  # will use default_opponents from config
 
     benchmark_champion(
+        config=config,
         matches=matches,
         opponents=opponents,
         output_path=output_path,
