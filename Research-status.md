@@ -32,7 +32,17 @@ result paragraphs here under "Recent results" when a sweep concludes.
 
 ## Current Open Problem — Q_select "saturation"
 
-> **[AI-REASONED PROVISIONAL FRAMING — 2026-05-18]** The framing of this
+> **[2026-05-19 — diagnostic suite returned: H1 (metric artefact) supported,
+> H2 and H3 falsified.]** See
+> [`analysis/qselect_diagnostics/REPORT.md`](analysis/qselect_diagnostics/REPORT.md).
+> The Q_select head at Ta(1) epoch 4350 encodes position structure
+> (`safe_piece_recall = 0.81` vs chance 0.11, Spearman ρ̄ = 0.55); the
+> match-outcome-conditioned Δ metric was averaging it away. Per-row
+> oversampling (H2) and structural trunk decoupling (H3) are deprioritised.
+> The text below is preserved as the framing that motivated the diagnostic
+> — the diagnostic now supersedes it.
+
+> **[AI-REASONED PROVISIONAL FRAMING — 2026-05-18, superseded by 2026-05-19 diagnostic]** The framing of this
 > section was revised after the Ta-series results. Direct measurements
 > (numbers, gate pass/fail) are reliable; mechanism stories are inferential
 > and may be biased. Future readers: verify with
@@ -112,9 +122,31 @@ at least one of D1/D2/D3 returning evidence for an architectural mechanism.
 | R | per-head loss weighting | OA-family | done (gate failed) — `series-R.md` |
 | S | structural trunk variants | OA-family | done (mixed) — `series-S.md`; Sa(1) "+0.170 Δ" re-interpreted as artefact 2026-05-18 |
 | T | minimax-oracle select target | Sa(3) | done — `series-T.md`; Ta(1) = **WR champion candidate**, but Q_select metric still flat |
-| **U?** | **Q_select diagnostics (not a training series)** | n/a | **active** — `analysis/qselect_diagnostics/PLAN.md` (D1/D2/D3) |
+| **U?** | **Q_select diagnostics (not a training series)** | n/a | **done 2026-05-19** — `analysis/qselect_diagnostics/REPORT.md` — H1 supported, H2/H3 falsified |
 
 ## Recent results
+
+### Q_select diagnostic suite — 2026-05-19 (on Ta(1) @ epoch 4350)
+
+D1/D2/D3 per [`analysis/qselect_diagnostics/PLAN.md`](analysis/qselect_diagnostics/PLAN.md);
+full write-up in [`analysis/qselect_diagnostics/REPORT.md`](analysis/qselect_diagnostics/REPORT.md).
+
+| Diagnostic | Metric | Joint net | Decoupled net (D3) | Chance | Verdict |
+|---|---|---|---|---|---|
+| D1 | `safe_piece_recall` | **0.807** | 0.620 | 0.115 | H1 supported |
+| D1 | `forcing_loss_bottom_recall` | **0.946** | 0.928 | 0.703 | H1 supported |
+| D1 | Spearman ρ̄ (n=896) | **0.547** | 0.365 | — | H1 supported |
+| D2 | `nonzero_frac_p5` (cheap path) | **0.953** overall (N=4: 0.94, N=2: 1.00) | — | — | H2 falsified |
+
+The strict `forcing_loss_recall` (n=1 forcing piece) is uninformative —
+mean forcing-set size is 5.83 of ~14 available pieces, so single-forcing
+states only fire ~0.1% of the time. Use the relaxed bottom-set recall
+instead.
+
+**Action:** retire α-reweighting (H2) and structural trunk decoupling (H3)
+from the forward queue. Replace the match-outcome-conditioned Q_select
+gate in `QuartoRL/results_io.py:192-214` with the D1 position-structure
+recalls. Open follow-up: re-evaluate older non-T checkpoints under D1.
 
 ### Ta_minimaxSelect — 2026-05-18 (3 runs)
 
@@ -184,24 +216,36 @@ Saturation is **not** a head-level pathology. Full write-up in
 
 ## Forward queue
 
-1. **Q_select diagnostic suite (D1/D2/D3)** — *active.* Three non-training
-   diagnostics under `analysis/qselect_diagnostics/` that distinguish
-   H1 (metric artefact) / H2 (signal sparsity) / H3 (multitask interference)
-   for the long-standing "Q_select saturation" observation. **D1 first**
-   (cheapest, falsifies the most). Implementation plan:
-   [`analysis/qselect_diagnostics/PLAN.md`](analysis/qselect_diagnostics/PLAN.md).
-2. **Ta(1) clean re-run + 10k confirmation** — the existing Ta(1) checkpoint
-   was truncated at epoch 4000 with WR still rising at +3.6 pp/1000ep.
+1. **Replace Q_select gate with D1 position-structure recalls** — the
+   match-outcome-conditioned Δ in
+   [`QuartoRL/results_io.py:192-214`](QuartoRL/results_io.py) is
+   uninformative (verified 2026-05-19 by D1 on Ta(1)). Add
+   `safe_piece_recall` and `forcing_loss_bottom_recall` to the JSONL
+   summary so all future runs ship the right gate by default. Suggested
+   gate: `safe_piece_recall` ≥ 0.70 (chance ≈ 0.11) for promotion.
+2. **Re-evaluate older Q_select-flat runs (M, S, OA) under D1** — cheap;
+   the diagnostic accepts any unified-autoreg checkpoint. If they also
+   pass D1 thresholds, "Q_select saturation" was a metric artefact across
+   the project's history, and several past "no progress on Q_select"
+   verdicts may need revision.
+3. **Ta(1) clean re-run + 10k confirmation** — the existing Ta(1) checkpoint
+   was truncated at epoch 4350 with WR still rising at +3.6 pp/1000ep.
    Re-run to 5000 (clean) then 10k (confirmation) before formally promoting
    over ME(2) as overall champion. Cheap; reuses the existing train script.
-3. **Sa(3) confirmation run** — re-run `Sa_archScan(3)0512_ARCH_S4_uniform512`
+4. **Sa(3) confirmation run** — re-run `Sa_archScan(3)0512_ARCH_S4_uniform512`
    at 10k epochs to lock the interpretability-substrate-of-record claim
    independently of Ta(1). Lower priority since Ta(1) already uses Sa(3).
-4. **Rb_schedAlpha** — time-varying (α_place, α_select). Tests whether a
-   warm Q_place trunk can absorb select-loss pressure that the cold-start
-   Ra grid could not. Lowest priority — Ra's `loss_select` floor was
-   targets-side evidence (now reframed by Ta), so Rb is an
-   optimisation-side hedge with less specific motivation than before.
+5. **Faithful-path D2 (buffer-dump hook)** — optional config-gated hook in
+   `trainRL.py` to log the actual replay buffer at fixed checkpoints. The
+   2026-05-19 D2 verdict was on the cheap path; faithful path would lock
+   the H2-falsified finding for early-training phases too.
+
+**Dropped 2026-05-19 (after diagnostic):**
+
+- **Rb_schedAlpha** — H2 (signal sparsity) was falsified; α-reweighting
+  in any form (static or scheduled) is now without motivation.
+- **Sb_hybridTrunk / structural select-trunk decoupling** — H3 was
+  falsified; the shared trunk helps Q_select, not hurts it.
 
 **Dropped 2026-05-18:**
 
@@ -209,9 +253,6 @@ Saturation is **not** a head-level pathology. Full write-up in
   Δ ≈ 0 remained; deeper lookahead does not address H1/H2/H3.
 - **Td_oracleCache** — Ta(2) showed depth=1 collapses to zero, so caching
   at that depth is pointless; depth=2 ran without it.
-- **Sb_hybridTrunk** — built on the Sa(1) "+0.170 Δ" inference that the
-  Ta-series re-reading classifies as likely artefact. Revisit only if a
-  diagnostic returns evidence for an architectural mechanism.
 
 All runs use the per-head loss / grad logging and JSONL emission from
 2026-05-12; runs trained after 2026-05-14 also receive `wr_trend` slope
@@ -248,5 +289,6 @@ Two-part name: **`XY_description`**.
 5. **Loss reweighting (R) is rejected as a fix for Q_select saturation.** `loss_select` has a floor near 0.24 invariant to a 30× swing in α_select / α_place; reweighting buys Q_select Δ ≤ +0.04 at a one-way WR cost. Gradient starvation is not the mechanism.
 6. **Structural trunk changes (S) close the unified-aux WR tax but not Q_select saturation.** Sa(3) matches ME(2) WR with the unified-aux substrate (+7pp over OA(1)) — new interpretability champion candidate. Sa(1) deepConv produced the largest numeric Q_select Δ on record (+0.170) but with no visible plate separation and a WR collapse. The select-side gap is not where deeper trunks alone close it.
 7. **Target noise (T-series) was half the story.** Clean minimax targets drove `loss_select` from the 0.24 R/S floor down to 0.055 — confirming the floor was target noise. But `Q_select` Δ stayed ≈0 under the match-outcome metric, and Ta(1) became a new WR champion candidate (80.3%) *via the place head*, not via a now-discriminative Q_select. The "Q_select saturation" open problem is now **under-determined between metric artefact (H1), buffer signal sparsity (H2), and multitask interference (H3)** — see `analysis/qselect_diagnostics/PLAN.md`. **[INFERENTIAL — written 2026-05-18 by an AI agent revisiting its own prior claims; verify with diagnostics before treating as load-bearing.]**
+8. **"Q_select saturation" was largely a metric artefact (2026-05-19).** The D1 diagnostic on Ta(1) @ epoch 4350 shows `safe_piece_recall = 0.81` vs chance 0.11, `forcing_loss_bottom_recall = 0.95` vs chance 0.70, and Spearman ρ̄ = 0.55 — the Q_select head ranks pieces correctly. The Δ-on-match-outcome metric averaged over many functionally neutral states and hid this. H2 (sparsity) and H3 (interference) were both falsified by D2 (95% buffer nonzero) and D3 (decoupled select-only net underperforms the joint net at 8× training data scale). Full write-up: [`analysis/qselect_diagnostics/REPORT.md`](analysis/qselect_diagnostics/REPORT.md). [DIRECT for numbers; interpretation AI-drafted.]
 
 For each of these, the originating series file in `docs/diary/` carries the full evidence.

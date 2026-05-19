@@ -1,0 +1,126 @@
+
+========== run_all started 2026-05-19T16:10:28.338336Z ==========
+# exp = Ta_minimaxSelect(1)0514_DEPTH_2
+# epoch = latest
+# include_d3 = True
+
+============================================================
+D1 — position_structure
+============================================================
+Wrote /mnt/mydrive/SAE-research/Quartopy-trainer/analysis/qselect_diagnostics/results/Ta_minimaxSelect(1)0514_DEPTH_2/position_structure.jsonl
+  n_states_total           = 1500
+  n_states_single_forcing  = 2
+  n_states_decisive        = 897
+  forcing_loss_recall      = 0.0
+  safe_piece_recall        = 0.8071348940914158
+  chance_baseline_recall   = 0.11457425888864016
+  spearman_rho_mean        = 0.5471702989064957  (n=896)
+[D1 took 360.6s]
+
+============================================================
+D2 — buffer_signal_density
+============================================================
+Wrote /mnt/mydrive/SAE-research/Quartopy-trainer/analysis/qselect_diagnostics/results/Ta_minimaxSelect(1)0514_DEPTH_2/buffer_signal_density.jsonl
+  total_select_rows         = 128
+  nonzero_frac_e3 (overall) = 0.953125
+  nonzero_frac_p1 (overall) = 0.953125
+  nonzero_frac_p5 (overall) = 0.953125
+  N=4: n=96  frac>p1=0.9375  frac>p5=0.9375
+  N=2: n=32  frac>p1=1.0  frac>p5=1.0
+[D2 took 16.1s]
+
+============================================================
+D3 — decoupled_select
+============================================================
+D3: train rows = 256, eval rows = 192
+  ep    1/2000  loss=0.327840
+  ep  100/2000  loss=0.015719
+  ep  200/2000  loss=0.004154
+  ep  300/2000  loss=0.002842
+  ep  400/2000  loss=0.002055
+  ep  500/2000  loss=0.001906
+  ep  600/2000  loss=0.001580
+  ep  700/2000  loss=0.001511
+  ep  800/2000  loss=0.001303
+  ep  900/2000  loss=0.001242
+  ep 1000/2000  loss=0.001184
+  ep 1100/2000  loss=0.001184
+  ep 1200/2000  loss=0.001136
+  ep 1300/2000  loss=0.001073
+  ep 1400/2000  loss=0.000969
+  ep 1500/2000  loss=0.000913
+  ep 1600/2000  loss=0.000862
+  ep 1700/2000  loss=0.000952
+  ep 1800/2000  loss=0.000825
+  ep 1900/2000  loss=0.000815
+  ep 2000/2000  loss=0.000840
+Wrote /mnt/mydrive/SAE-research/Quartopy-trainer/analysis/qselect_diagnostics/results/Ta_minimaxSelect(1)0514_DEPTH_2/decoupled_select.jsonl
+  decoupled forcing_loss_recall = None  safe_piece_recall = 0.42424242424242425  rho_mean = 0.18178157597653738
+[D3 took 111.2s]
+
+========== run_all finished 2026-05-19T16:18:36.324342Z ==========
+
+========== run_all started 2026-05-19T16:35:19.360550Z ==========
+# exp = Ta_minimaxSelect(1)0514_DEPTH_2
+# epoch = latest
+# include_d3 = True
+
+============================================================
+D1 — position_structure
+============================================================
+Wrote /mnt/mydrive/SAE-research/Quartopy-trainer/analysis/qselect_diagnostics/results/Ta_minimaxSelect(1)0514_DEPTH_2/position_structure.jsonl
+  n_states_total                = 1500
+  n_states_decisive             = 897
+  n_states_any_forcing          = 1167
+  n_states_single_forcing       = 2
+  forcing_set_size_mean         = 5.8320479862896315
+  forcing_loss_recall (n=1)     = 0.0
+  forcing_loss_bottom_recall    = 0.9460154241645244
+  forcing_loss_bottom_chance    = 0.7034218043215473
+  safe_piece_recall             = 0.8071348940914158
+  chance_baseline_recall        = 0.11457425888864016
+  spearman_rho_mean             = 0.5471702989064957  (n=896)
+[D1 took 361.8s]
+
+============================================================
+D2 — buffer_signal_density
+============================================================
+Wrote /mnt/mydrive/SAE-research/Quartopy-trainer/analysis/qselect_diagnostics/results/Ta_minimaxSelect(1)0514_DEPTH_2/buffer_signal_density.jsonl
+  total_select_rows         = 128
+  nonzero_frac_e3 (overall) = 0.953125
+  nonzero_frac_p1 (overall) = 0.953125
+  nonzero_frac_p5 (overall) = 0.953125
+  N=4: n=96  frac>p1=0.9375  frac>p5=0.9375
+  N=2: n=32  frac>p1=1.0  frac>p5=1.0
+[D2 took 16.2s]
+
+============================================================
+D3 — decoupled_select
+============================================================
+D3: train rows = 2048, eval rows = 1536
+  ep    1/4000  loss=0.205345
+  ep  200/4000  loss=0.004945
+  ep  400/4000  loss=0.003182
+  ep  600/4000  loss=0.002753
+  ep  800/4000  loss=0.002587
+  ep 1000/4000  loss=0.002391
+  ep 1200/4000  loss=0.002313
+  ep 1400/4000  loss=0.002261
+  ep 1600/4000  loss=0.002224
+  ep 1800/4000  loss=0.002207
+  ep 2000/4000  loss=0.002154
+  ep 2200/4000  loss=0.002141
+  ep 2400/4000  loss=0.002141
+  ep 2600/4000  loss=0.002161
+  ep 2800/4000  loss=0.002103
+  ep 3000/4000  loss=0.002003
+  ep 3200/4000  loss=0.002025
+  ep 3400/4000  loss=0.002029
+  ep 3600/4000  loss=0.002016
+  ep 3800/4000  loss=0.001960
+  ep 4000/4000  loss=0.001963
+Wrote /mnt/mydrive/SAE-research/Quartopy-trainer/analysis/qselect_diagnostics/results/Ta_minimaxSelect(1)0514_DEPTH_2/decoupled_select.jsonl
+  decoupled safe_piece_recall = 0.6201456310679612  forcing_loss_bottom_recall = 0.928 (chance=0.7908297783025056)  rho_mean = 0.3648916358170536
+[D3 took 1397.3s]
+
+========== run_all finished 2026-05-19T17:04:54.628554Z ==========
