@@ -1,6 +1,6 @@
 commands.md
 .vscode/
-logs/**.log
+*.log
 *.html
 .claude/
 *.npz
