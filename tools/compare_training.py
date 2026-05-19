@@ -386,8 +386,8 @@ def find_experiment_folders(base_path, experiment_names):
                     }
                 )
 
-    # Sort by parameter value
-    folders.sort(key=lambda x: x["param_value"])
+    # Sort by parameter value (handle mixed str/float gracefully)
+    folders.sort(key=lambda x: (0, x["param_value"]) if isinstance(x["param_value"], (int, float)) else (1, str(x["param_value"])))
     return folders
 
 
