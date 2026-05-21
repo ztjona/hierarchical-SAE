@@ -99,6 +99,35 @@ PARAMS = [2, 3, 4, 12]
 # ]
 MULTI_PARAMS = None
 
+# Te_oracleAblation — Ve-series: ablate the minimax oracle mid-training and
+# observe whether Q_select competence is sustained by MC supervision.
+# Base recipe = Ta(1): unified_autoreg + QuartoCNNAutoregUnifiedS4 + depth-2
+# minimax select target. EPOCHS bumped to 6000 so each variant has ≥2000
+# post-ablation epochs.
+MULTI_PARAMS = [
+    {
+        "ARCHITECTURE": "QuartoCNNAutoregUnifiedS4",
+        "USE_MINIMAX_SELECT_TARGET": True,
+        "EPOCHS": "6_000",
+        "MINIMAX_DISABLE_AFTER_EPOCH": None,
+        "_label": "DISABLE_NEVER",
+    },
+    {
+        "ARCHITECTURE": "QuartoCNNAutoregUnifiedS4",
+        "USE_MINIMAX_SELECT_TARGET": True,
+        "EPOCHS": "6_000",
+        "MINIMAX_DISABLE_AFTER_EPOCH": 2000,
+        "_label": "DISABLE_2000",
+    },
+    {
+        "ARCHITECTURE": "QuartoCNNAutoregUnifiedS4",
+        "USE_MINIMAX_SELECT_TARGET": True,
+        "EPOCHS": "6_000",
+        "MINIMAX_DISABLE_AFTER_EPOCH": 4000,
+        "_label": "DISABLE_4000",
+    },
+]
+
 # Path to the original training script
 TRAIN_SCRIPT = "trainRL.py"
 OUTPUT_DIR = "train_scripts/"
@@ -204,6 +233,7 @@ def main():
 
     created_files = []
     run_commands = []
+    nohup_lines = []  # parallel-safe nohup commands (thread-capped, logged)
 
     variants = _build_variants()
     for idx, label, pairs in variants:
@@ -221,6 +251,16 @@ def main():
                 run_commands.append(f'./runpy.sh "{script_path}"')
             else:
                 run_commands.append(f'./runpy.sh --no_echo "{script_path}" &')
+
+            # nohup variant: thread-capped (1 BLAS thread / proc) so N parallel
+            # PyTorch processes don't oversubscribe on a small-core machine.
+            # Each process gets its own log file under logs/.
+            log_path = f"logs/{exp_variant_name}.log"
+            nohup_lines.append(
+                "OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 "
+                f'nohup ./runpy.sh --no_echo "{script_path}" '
+                f'> "{log_path}" 2>&1 &'
+            )
         except Exception as e:
             print(f"Failed to create file for {label}: {e}")
 
@@ -238,17 +278,12 @@ def main():
         print(command)
 
     print(f"\n{'=' * 80}")
-    print("TO RUN TRAINING (VPS via SSH, survives disconnect):")
+    print("TO RUN TRAINING (background, parallel, thread-capped, logged):")
     print(f"{'=' * 80}")
-    for command in run_commands:
-        # nohup keeps the process alive after SSH disconnect
-        # >/dev/null 2>&1 suppresses nohup.out (runpy.sh already logs to logs/)
-        print(
-            f"nohup {command} >/dev/null 2>&1"
-            if not command.endswith("&")
-            else f"nohup {command[:-2]} >/dev/null 2>&1 &"
-        )
-
+    print("mkdir -p logs")
+    for line in nohup_lines:
+        print(line)
+    print("disown -a")
     print(f"{'=' * 80}\n")
 
 

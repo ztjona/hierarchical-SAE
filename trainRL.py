@@ -97,6 +97,15 @@ DECOUPLED_TARGET_STYLE = "td_place_mc_select"  # Options: "td_place_mc_select", 
 USE_MINIMAX_SELECT_TARGET = False
 MINIMAX_SELECT_DEPTH = 2  # Used only when USE_MINIMAX_SELECT_TARGET is True.
 
+# ---- Ve-series knob: oracle ablation ----
+# When set to a positive integer K, the SELECT_ORACLE is disabled (set to None)
+# at the top of epoch K, AND DECOUPLED_TARGET_STYLE is switched to
+# "td_place_mc_select" for the rest of training. This lets us probe whether
+# the oracle's effect on Q_select persists without continued supervision.
+# Default None = no-op (oracle stays on for the whole run).
+# Only meaningful when USE_MINIMAX_SELECT_TARGET=True.
+MINIMAX_DISABLE_AFTER_EPOCH = None
+
 if USE_MINIMAX_SELECT_TARGET:
     DECOUPLED_TARGET_STYLE = "td_place_minimax_select"
     from bot.minimax_bot import MinimaxBot
@@ -105,6 +114,10 @@ if USE_MINIMAX_SELECT_TARGET:
     logger.info(
         f"T-series: minimax-oracle select target ENABLED (depth={MINIMAX_SELECT_DEPTH})"
     )
+    if MINIMAX_DISABLE_AFTER_EPOCH is not None:
+        logger.info(
+            f"Ve-series: oracle will be DISABLED at epoch {MINIMAX_DISABLE_AFTER_EPOCH}"
+        )
 else:
     SELECT_ORACLE = None
 
@@ -173,6 +186,14 @@ TEMPERATURE_EXPLOIT = 0.1
 
 FREQ_EPOCH_SAVING = 1000  # save model, figures every n epochs
 CHECKPOINT_FREQ = 50  # save model weights every n epochs; final epoch is always saved
+
+# ---- Vc: live competence audit (Tests A + B from analysis/competence_audit) ----
+# Every K epochs run cheap Test-A (winning placement) and Test-B (losing-piece
+# avoidance) on a fixed held-out state sample. Only active for unified_autoreg.
+LIVE_AUDIT_ENABLED = True
+LIVE_AUDIT_EVERY_K_EPOCHS = 50
+LIVE_AUDIT_N_STATES = 200
+LIVE_AUDIT_SEED = 42
 
 
 # Plots are shown every epoch until this number of epochs. After that, only every
@@ -351,6 +372,91 @@ grad_norm_data: dict[str, list[float | int]] = {
 init(autoreset=True)  # COLORAMA
 
 logger.info("Hyperparameters loaded.")
+
+# ---- Vc: pre-sample live-audit states once, with a fixed seed ----
+# Tests A and B from analysis/competence_audit/audit.py; cheap probes of
+# Q_place (winning placement) and Q_select (losing-piece avoidance).
+# Only the unified_autoreg schema is supported by the audit helpers.
+live_audit_place_states: list = []
+live_audit_select_states: list = []
+live_audit_jsonl_path: str | None = None
+if LIVE_AUDIT_ENABLED and TRANSITION_SCHEMA == "unified_autoreg":
+    try:
+        import sys as _sys
+        _audit_dir = path.join(path.dirname(path.abspath(__file__)), "analysis", "competence_audit")
+        if _audit_dir not in _sys.path:
+            _sys.path.insert(0, _audit_dir)
+        from audit import sample_states as _audit_sample_states  # type: ignore
+        from audit import run_tests_abc as _audit_run_tests_abc  # type: ignore
+
+        logger.info(
+            f"Vc: sampling {LIVE_AUDIT_N_STATES} held-out audit states "
+            f"(seed={LIVE_AUDIT_SEED})…"
+        )
+        live_audit_place_states, live_audit_select_states = _audit_sample_states(
+            policy_net,
+            n_states=LIVE_AUDIT_N_STATES,
+            mode_2x2=mode_2x2,
+            n_last_states=N_LAST_STATES_INIT,
+            temperature=TEMPERATURE_EXPLORE,
+            seed=LIVE_AUDIT_SEED,
+        )
+        live_audit_jsonl_path = path.join(
+            RESULTS_FOLDER, f"{EXPERIMENT_NAME}.live_audit.jsonl"
+        )
+        logger.info(
+            f"Vc: live audit ENABLED — PLACE={len(live_audit_place_states)} "
+            f"SELECT={len(live_audit_select_states)} states, every "
+            f"{LIVE_AUDIT_EVERY_K_EPOCHS} epochs → {live_audit_jsonl_path}"
+        )
+    except Exception as _exc:
+        logger.warning(f"Vc: live audit DISABLED — failed to initialise: {_exc}")
+        live_audit_place_states = []
+        live_audit_select_states = []
+elif LIVE_AUDIT_ENABLED:
+    logger.info(
+        f"Vc: live audit skipped — only supported for unified_autoreg "
+        f"(current schema: {TRANSITION_SCHEMA})"
+    )
+
+
+def _run_live_audit(epoch_1based: int) -> None:
+    """Run Tests A+B on the held-out sample and append a JSONL record."""
+    if not live_audit_place_states or live_audit_jsonl_path is None:
+        return
+    try:
+        _was_training = policy_net.training
+        policy_net.eval()
+        ab_record = _audit_run_tests_abc(
+            policy_net,
+            live_audit_place_states,
+            live_audit_select_states,
+        )
+        if _was_training:
+            policy_net.train()
+        out = {
+            "epoch": epoch_1based,
+            "n_place_states": len(live_audit_place_states),
+            "n_select_states": len(live_audit_select_states),
+            "test_A_winning_placement": ab_record.get("test_A_winning_placement"),
+            "test_B_losing_piece_avoidance": ab_record.get(
+                "test_B_losing_piece_avoidance"
+            ),
+        }
+        import json as _json
+        with open(live_audit_jsonl_path, "a") as _f:
+            _f.write(_json.dumps(out) + "\n")
+        a_acc = (out["test_A_winning_placement"] or {}).get("accuracy")
+        b_acc = (out["test_B_losing_piece_avoidance"] or {}).get("accuracy")
+        logger.info(
+            f"Vc audit @ epoch {epoch_1based}: "
+            f"A={a_acc if a_acc is None else f'{a_acc:.3f}'}  "
+            f"B={b_acc if b_acc is None else f'{b_acc:.3f}'}"
+        )
+    except Exception as _exc:
+        logger.warning(f"Vc audit @ epoch {epoch_1based} failed: {_exc}")
+
+
 logger.info("Starting training...")
 
 # -------------------------- TRAINING LOOP ---------------------------
@@ -359,6 +465,24 @@ step_i = -1  # counter of training steps
 for e in tqdm(
     range(EPOCHS), desc=f"{Fore.GREEN}Epochs{Style.RESET_ALL}", position=0, leave=True
 ):
+    # ---- Ve: oracle ablation hook ----
+    # Disable the minimax oracle at the configured epoch and switch the
+    # select target to MC outcome supervision. Buffer rolls over naturally
+    # (NUM_EPOCHs_BUFFER epochs) — no need to flush.
+    if (
+        USE_MINIMAX_SELECT_TARGET
+        and MINIMAX_DISABLE_AFTER_EPOCH is not None
+        and SELECT_ORACLE is not None
+        and e >= MINIMAX_DISABLE_AFTER_EPOCH
+    ):
+        logger.info(
+            f"Ve: disabling minimax oracle at epoch {e} "
+            f"(MINIMAX_DISABLE_AFTER_EPOCH={MINIMAX_DISABLE_AFTER_EPOCH}). "
+            "Switching DECOUPLED_TARGET_STYLE → 'td_place_mc_select'."
+        )
+        SELECT_ORACLE = None
+        DECOUPLED_TARGET_STYLE = "td_place_mc_select"
+
     # load models
     p1 = PLAYER_BOT_CLASS(
         model=policy_net, deterministic=False, temperature=TEMPERATURE_EXPLORE
@@ -643,6 +767,14 @@ for e in tqdm(
     # ------ Store results
     epochs_results.append(dict(contest_results))
 
+    # ---- Vc: live competence audit (Tests A + B), every K epochs ----
+    if (
+        live_audit_place_states
+        and LIVE_AUDIT_EVERY_K_EPOCHS > 0
+        and ((e + 1) % LIVE_AUDIT_EVERY_K_EPOCHS == 0 or (e + 1) == EPOCHS)
+    ):
+        _run_live_audit(epoch_1based=e + 1)
+
     if (FREQ_EPOCH_SAVING > 0 and (e + 1) % FREQ_EPOCH_SAVING == 0) or (
         e + 1
     ) == EPOCHS:
@@ -684,6 +816,7 @@ for e in tqdm(
                 "DECOUPLED_TARGET_STYLE": DECOUPLED_TARGET_STYLE,
                 "USE_MINIMAX_SELECT_TARGET": USE_MINIMAX_SELECT_TARGET,
                 "MINIMAX_SELECT_DEPTH": MINIMAX_SELECT_DEPTH,
+                "MINIMAX_DISABLE_AFTER_EPOCH": MINIMAX_DISABLE_AFTER_EPOCH,
                 "LOSS_APPROACH": LOSS_APPROACH,
                 "REWARD_FUNCTION": REWARD_FUNCTION,
                 "LOSS_ALPHA_PLACE": LOSS_ALPHA_PLACE,
