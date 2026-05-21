@@ -83,9 +83,11 @@ BASELINEs = [
     # {"Ab_data": [4, 8, 12]},
     {"Aa_replay": [8]},
     {"JA_final": [3]},
-    {"LA_mcSelect": [2, 3]},
+    {"LA_mcSelect": [2]},
+    # {"LA_mcSelect": [2, 3]},
     {"MA_tempRegresive": [2, 4]},
     {"ME_endgame": [0.5]},
+    {"Ta_minimaxSelect": [2]}  # [2] matches DEPTH_2 → Ta(1)0514, the depth=2 champion candidate
 ]
 # BASELINEs = []  # Disable baselines
 
@@ -329,6 +331,8 @@ def extract_run_index(folder_name):
 
 def numeric_value_matches(value, candidates, atol=1e-12, rtol=1e-9):
     """Return True if value matches any candidate using numeric tolerance."""
+    if not isinstance(value, (int, float)):
+        return False
     for candidate in candidates:
         if np.isclose(value, float(candidate), atol=atol, rtol=rtol):
             return True
