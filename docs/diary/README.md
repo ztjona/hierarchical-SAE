@@ -40,6 +40,7 @@ which experiment uses it.
 | R | [series-R.md](series-R.md) | Per-head loss reweighting — `loss_select` floor, gradient-starvation rejected (2026-05) |
 | S | [series-S.md](series-S.md) | Structural trunk variants — Sa(3) new interpretability champion candidate (2026-05) |
 | T | [series-T.md](series-T.md) | Minimax-oracle distillation on the SELECT head (2026-05, in flight) |
+| V | [series-V.md](series-V.md) | Oracle-ablation mid-training — Ve(1) new WR champion candidate; D1 confirms oracle is persistent driver, not warmup (2026-05) |
 
 ### Design notes
 

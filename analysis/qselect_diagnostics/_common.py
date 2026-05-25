@@ -82,6 +82,7 @@ _ARCHITECTURE_REGISTRY: dict[str, type] = {
 # substrate (S4). Extend as new series come online.
 _EXP_ARCH_HINTS: list[tuple[str, str]] = [
     ("Ta_minimaxSelect", "QuartoCNNAutoregUnifiedS4"),
+    ("Ve_oracleAblation", "QuartoCNNAutoregUnifiedS4"),
     ("S4", "QuartoCNNAutoregUnifiedS4"),
     ("S1", "QuartoCNNAutoregUnifiedS1"),
     ("S2", "QuartoCNNAutoregUnifiedS2"),

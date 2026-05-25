@@ -1,18 +1,19 @@
 # Summary — Ve_oracleAblation
 
-Generated: 2026-05-21 10:37
-Parameter varied: `DISABLE`, `Sweep`
-Runs: 3 (+ 7 baselines)
+Generated: 2026-05-24 19:18
+Parameter varied: `DISABLE`, `DISABLE_NEVER`, `Sweep`
+Runs: 4 (+ 7 baselines)
 
 Final metrics = mean over the last 10% of epochs. `Peak` = max of the smoothed win-rate curve reached at any point during training. `Trend` = OLS slope (pp per 1000 epochs) on the smoothed back half of the WR curve, decimated to the smoothing window for approximate independence; `↑` marks slopes whose 95% CI is strictly positive (i.e. the curve was still climbing at the end of training).
 
 ## Experiment runs
 
-| Run                                    | Param               | Epochs | Final loss | Final vs bot_loss-BT | Peak vs bot_loss-BT | Trend vs bot_loss-BT | Final vs bot_random | Peak vs bot_random | Trend vs bot_random |
-|----------------------------------------|---------------------|--------|------------|----------------------|---------------------|----------------------|---------------------|--------------------|---------------------|
-| Ve_oracleAblation(2)0519_DISABLE_2000  | DISABLE=2000        | 6000   | 0.1589     | 78.3%                | 80.3%               | +2.1↑                | 89.3%               | 91.1%              | +1.2↑               |
-| Ve_oracleAblation(3)0519_DISABLE_4000  | DISABLE=4000        | 6000   | 0.1588     | 79.1%                | 81.5%               | +0.1                 | 89.5%               | 91.5%              | -0.0                |
-| Ve_oracleAblation(1)0519_DISABLE_NEVER | Sweep=DISABLE_NEVER | 6000   | 0.0602     | 85.2%                | 87.1%               | +2.9↑                | 92.0%               | 92.9%              | +1.2↑               |
+| Run                                        | Param               | Epochs | Final loss | Final vs bot_loss-BT | Peak vs bot_loss-BT | Trend vs bot_loss-BT | Final vs bot_random | Peak vs bot_random | Trend vs bot_random |
+|--------------------------------------------|---------------------|--------|------------|----------------------|---------------------|----------------------|---------------------|--------------------|---------------------|
+| Ve_oracleAblation(2)0519_DISABLE_2000      | DISABLE=2000        | 6000   | 0.1589     | 78.3%                | 80.3%               | +2.1↑                | 89.3%               | 91.1%              | +1.2↑               |
+| Ve_oracleAblation(3)0519_DISABLE_4000      | DISABLE=4000        | 6000   | 0.1588     | 79.1%                | 81.5%               | +0.1                 | 89.5%               | 91.5%              | -0.0                |
+| Ve_oracleAblation(4)0522_DISABLE_NEVER_10k | DISABLE_NEVER=10k   | 10000  | 0.0495     | 87.2%                | 88.9%               | +0.6↑                | 93.8%               | 94.8%              | +0.4↑               |
+| Ve_oracleAblation(1)0519_DISABLE_NEVER     | Sweep=DISABLE_NEVER | 6000   | 0.0602     | 85.2%                | 87.1%               | +2.9↑                | 92.0%               | 92.9%              | +1.2↑               |
 
 ## Baselines
 
@@ -28,6 +29,6 @@ Final metrics = mean over the last 10% of epochs. `Peak` = max of the smoothed w
 
 ## Best runs (experiments only)
 
-- Lowest final loss: **Ve_oracleAblation(1)0519_DISABLE_NEVER** — 0.0602
-- Highest final WR vs bot_loss-BT: **Ve_oracleAblation(1)0519_DISABLE_NEVER** — 85.2%
-- Highest final WR vs bot_random: **Ve_oracleAblation(1)0519_DISABLE_NEVER** — 92.0%
+- Lowest final loss: **Ve_oracleAblation(4)0522_DISABLE_NEVER_10k** — 0.0495
+- Highest final WR vs bot_loss-BT: **Ve_oracleAblation(4)0522_DISABLE_NEVER_10k** — 87.2%
+- Highest final WR vs bot_random: **Ve_oracleAblation(4)0522_DISABLE_NEVER_10k** — 93.8%

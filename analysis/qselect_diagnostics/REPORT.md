@@ -220,3 +220,53 @@ Run records, console logs, and JSONL records are under
   are reliable; the *interpretation* of those numbers as "H1 supported"
   / "H2 falsified" / "H3 falsified" is the AI's framing and should be
   spot-checked before being treated as load-bearing.
+
+---
+
+## Follow-up — D1 across Ve_oracleAblation (2026-05-22)
+
+Action item 4 was partially executed against the Ve series, which extends
+the Ta(1) recipe with a `MINIMAX_DISABLE_AFTER_EPOCH` knob. Three runs at
+6000 epochs each, all evaluated via the same `position_structure.py` script
+on 1500 SELECT states. Per-run JSONL under
+[`results/Ve_oracleAblation(*)/position_structure.jsonl`](results/).
+
+| Run | Disable @ | `safe_piece_recall` | `forcing_loss_bottom_recall` | Spearman ρ̄ | `n_decisive` |
+|---|---|---|---|---|---|
+| Ve(1) NEVER | — | **0.821** | **0.957** | **0.578** | 925 |
+| Ve(2) DIS 2000 | 2000 | 0.541 | 0.830 | 0.247 | 887 |
+| Ve(3) DIS 4000 | 4000 | 0.580 | 0.854 | 0.272 | 879 |
+| Ta(1) ref @ 4350 | — | 0.807 | 0.946 | 0.547 | 896 |
+| chance | — | 0.114 | 0.700 | 0 | — |
+
+**Reading.** Ve(1) reproduces and slightly exceeds Ta(1) on every D1
+metric, confirming the position-structure recall reading was not a Ta(1)
+idiosyncrasy. Disabling the oracle causes a substantial — but not total —
+drop in recall: Ve(2)/Ve(3) sit roughly midway between Ve(1) and chance.
+MC supervision after disable does **not** preserve the oracle-imprinted
+structure; it pushes Q_select toward a fixed sub-oracle equilibrium that
+is reached regardless of when the cut is made (Ve(2) ≈ Ve(3)).
+
+**Implications.**
+
+- **H1 reaffirmed across runs** — D1 captures real, oracle-dependent
+  structure, not a Ta(1)-specific artefact.
+- **Action item 1 strengthened** — the position-structure recall metric
+  is now load-bearing for two different experiment families and should
+  ship as the default Q_select gate.
+- **Sharper prediction for action item 4** — pre-T runs (M / S / OA),
+  which were never oracle-supervised, are predicted to land near
+  Ve(2)/Ve(3)'s residual (~0.55 safe-piece recall) rather than near
+  Ve(1)'s 0.82. Worth a cheap scan; pre-T architecture hints need
+  adding to [`_common.py`](_common.py) line 83 first (Ve uses S4 and
+  is already covered).
+
+**Loader fix shipped with the Ve D1 scan.**
+[`_common.py:84`](_common.py) — added
+`("Ve_oracleAblation", "QuartoCNNAutoregUnifiedS4")` to `_EXP_ARCH_HINTS`
+so the loader picks the S4 trunk rather than the default
+`QuartoCNNAutoregUnified`. Future series running on Sa(3) need a new
+hint entry or `--architecture` override; the existing `("S4", ...)`
+substring rule does not match the Ve naming.
+
+Full series write-up: [`docs/diary/series-V.md`](../../docs/diary/series-V.md).

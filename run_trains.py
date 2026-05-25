@@ -126,6 +126,13 @@ MULTI_PARAMS = [
         "MINIMAX_DISABLE_AFTER_EPOCH": 4000,
         "_label": "DISABLE_4000",
     },
+    {
+      "ARCHITECTURE": "QuartoCNNAutoregUnifiedS4",
+      "USE_MINIMAX_SELECT_TARGET": True,
+      "EPOCHS": "10_000",
+      "MINIMAX_DISABLE_AFTER_EPOCH": None,
+      "_label": "DISABLE_NEVER_10k",
+  },
 ]
 
 # Path to the original training script

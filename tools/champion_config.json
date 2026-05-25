@@ -1,13 +1,20 @@
 {
-    "champion": "Ta_minimaxSelect_1",
+    "champion": "Ve_oracleAblation_4",
     "default_opponents": [
         "random",
         "loss_BT",
         "Aa_replay",
         "ME_endgame",
-        "Sa_archScan_3"
+        "Sa_archScan_3",
+        "Ta_minimaxSelect_1"
     ],
     "bots": {
+        "Ve_oracleAblation_4": {
+            "path": "CHECKPOINTS/Ve_oracleAblation(4)0522_DISABLE_NEVER_10k/20260524_1904-Ve_oracleAblation(4)0522_DISABLE_NEVER_10k_E_10000.pt",
+            "model_class": "QuartoCNNAutoregUnifiedS4",
+            "bot_class": "Quarto_unified_bot",
+            "name": "Ve_oracleAblation(4) [NEVER, E=10000]"
+        },
         "Ta_minimaxSelect_1": {
             "path": "CHECKPOINTS/Ta_minimaxSelect(1)0514_DEPTH_2/20260516_1452-Ta_minimaxSelect(1)0514_DEPTH_2_E_4350.pt",
             "model_class": "QuartoCNNAutoregUnifiedS4",
