@@ -106,6 +106,20 @@ MINIMAX_SELECT_DEPTH = 2  # Used only when USE_MINIMAX_SELECT_TARGET is True.
 # Only meaningful when USE_MINIMAX_SELECT_TARGET=True.
 MINIMAX_DISABLE_AFTER_EPOCH = None
 
+# ---- D1 in-loop diagnostic (forward-queue #1, 2026-05-24) ----
+# Run analysis.qselect_diagnostics.position_structure inline at every
+# checkpoint event so safe_piece_recall / forcing_loss_bottom_recall ship
+# in the per-checkpoint JSONL record. The match-outcome-conditioned
+# Q_select Δ has been confirmed uninformative (see Research-status.md
+# Open Problem). D1 is the replacement select-side gate. Auto-disabled
+# on non-unified_autoreg schemas (sample_states uses Quarto_unified_bot).
+# Cost: ~10s per checkpoint at the default n_states=200 (negligible vs
+# training step time).
+COMPUTE_D1_INLINE = True
+D1_N_STATES = 200
+D1_ORACLE_DEPTH = 2
+D1_SEED = 1234
+
 if USE_MINIMAX_SELECT_TARGET:
     DECOUPLED_TARGET_STYLE = "td_place_minimax_select"
     from bot.minimax_bot import MinimaxBot
@@ -798,12 +812,23 @@ for e in tqdm(
         jsonl_path = path.join(
             RESULTS_FOLDER, f"{EXPERIMENT_NAME}{SUMMARY_SUFFIX}"
         )
+        # D1 only runs on the unified_autoreg schema (sample_states uses
+        # Quarto_unified_bot); silently a no-op otherwise.
+        d1_cfg = {
+            "enabled": COMPUTE_D1_INLINE and TRANSITION_SCHEMA == "unified_autoreg",
+            "n_states": D1_N_STATES,
+            "n_last_states": N_LAST_STATES_FINAL,
+            "oracle_depth": D1_ORACLE_DEPTH,
+            "seed": D1_SEED,
+        }
         ckpt_rec = build_checkpoint_record(
             epoch=e + 1,
             loss_data=loss_data,
             grad_norm_data=grad_norm_data,
             win_rate=win_rate,
             q_values_history=q_values_history,
+            policy_net=policy_net,
+            d1_config=d1_cfg,
         )
         append_record(jsonl_path, ckpt_rec)
 
@@ -848,6 +873,8 @@ for e in tqdm(
                 grad_norm_data=grad_norm_data,
                 win_rate=win_rate,
                 q_values_history=q_values_history,
+                policy_net=policy_net,
+                d1_config=d1_cfg,
             )
             append_record(jsonl_path, final_rec)
 

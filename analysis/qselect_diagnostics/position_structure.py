@@ -114,33 +114,13 @@ def _state_spearman(
     return float(rho)
 
 
-def run(
-    exp_name: str,
-    epoch: int | None,
-    n_states: int,
-    n_pieces_min: int,
-    n_last_states: int,
-    oracle_depth: int,
-    seed: int,
-) -> dict:
-    net, cfg = load_checkpoint(exp_name, epoch=epoch)
+def _aggregate_metrics(raw_states: list[SelectState], q_all: np.ndarray) -> dict:
+    """Classify each (state, q_predictions) pair and aggregate D1 metrics.
 
-    # We over-sample so the post-filter set still hits n_states.
-    raw_states: list[SelectState] = sample_states(
-        net=net,
-        n_states=n_states * 3,
-        n_pieces_min=n_pieces_min,
-        mode_2x2=True,
-        n_last_states=n_last_states,
-        oracle_depth=oracle_depth,
-        require_nonzero_oracle=False,
-        seed=seed,
-    )
-    if not raw_states:
-        raise RuntimeError("No states sampled.")
-
-    q_all = qselect_predict(net, raw_states)
-
+    Shared between the CLI ``run()`` and the in-loop
+    ``compute_position_structure_record`` helper, so the training-loop
+    summary and the standalone diagnostic compute the same numbers.
+    """
     n_total = len(raw_states)
     n_decisive = 0
     n_single_force = 0
@@ -216,6 +196,97 @@ def run(
         "p50": float(np.percentile(rho_arr, 50)) if len(rho_arr) else None,
         "p75": float(np.percentile(rho_arr, 75)) if len(rho_arr) else None,
     }
+
+    return {
+        "n_states_total": int(n_total),
+        "n_states_decisive": int(n_decisive),
+        "n_states_single_forcing": int(n_single_force),
+        "n_states_any_forcing": int(n_any_force),
+        "forcing_set_size_mean": forcing_set_size_mean,
+        "forcing_loss_recall": forcing_loss_recall,
+        "forcing_loss_bottom_recall": forcing_loss_bottom_recall,
+        "forcing_loss_bottom_chance": forcing_loss_bottom_chance,
+        "safe_piece_recall": safe_piece_recall,
+        "chance_baseline_recall": chance_baseline,
+        "spearman_rho": rho_summary,
+    }
+
+
+def compute_position_structure_record(
+    net,
+    *,
+    n_states: int = 200,
+    n_pieces_min: int = 2,
+    n_last_states: int = 4,
+    oracle_depth: int = 2,
+    seed: int = 1234,
+) -> dict | None:
+    """In-process D1 for the training loop. Lighter than the CLI ``run()``.
+
+    Returns the same per-state-aggregation dict produced by
+    ``_aggregate_metrics`` (so JSONL fields match the standalone
+    diagnostic), or ``None`` if sampling returned no usable states. No
+    JSONL emission, no checkpoint metadata; the caller injects fields
+    into the training-loop record.
+
+    Lighter default ``n_states`` (200 vs 500) keeps per-checkpoint cost
+    ~10s on Sa(3); std-error of recall stays under ±0.02 at the typical
+    ~0.8 operating point.
+    """
+    raw_states: list[SelectState] = sample_states(
+        net=net,
+        n_states=n_states * 3,
+        n_pieces_min=n_pieces_min,
+        mode_2x2=True,
+        n_last_states=n_last_states,
+        oracle_depth=oracle_depth,
+        require_nonzero_oracle=False,
+        seed=seed,
+    )
+    if not raw_states:
+        return None
+    q_all = qselect_predict(net, raw_states)
+    return _aggregate_metrics(raw_states, q_all)
+
+
+def run(
+    exp_name: str,
+    epoch: int | None,
+    n_states: int,
+    n_pieces_min: int,
+    n_last_states: int,
+    oracle_depth: int,
+    seed: int,
+) -> dict:
+    net, cfg = load_checkpoint(exp_name, epoch=epoch)
+
+    # We over-sample so the post-filter set still hits n_states.
+    raw_states: list[SelectState] = sample_states(
+        net=net,
+        n_states=n_states * 3,
+        n_pieces_min=n_pieces_min,
+        mode_2x2=True,
+        n_last_states=n_last_states,
+        oracle_depth=oracle_depth,
+        require_nonzero_oracle=False,
+        seed=seed,
+    )
+    if not raw_states:
+        raise RuntimeError("No states sampled.")
+
+    q_all = qselect_predict(net, raw_states)
+    metrics = _aggregate_metrics(raw_states, q_all)
+    n_total = metrics["n_states_total"]
+    n_decisive = metrics["n_states_decisive"]
+    n_single_force = metrics["n_states_single_forcing"]
+    n_any_force = metrics["n_states_any_forcing"]
+    forcing_set_size_mean = metrics["forcing_set_size_mean"]
+    forcing_loss_recall = metrics["forcing_loss_recall"]
+    forcing_loss_bottom_recall = metrics["forcing_loss_bottom_recall"]
+    forcing_loss_bottom_chance = metrics["forcing_loss_bottom_chance"]
+    safe_piece_recall = metrics["safe_piece_recall"]
+    chance_baseline = metrics["chance_baseline_recall"]
+    rho_summary = metrics["spearman_rho"]
 
     record = {
         "diagnostic": "position_structure",

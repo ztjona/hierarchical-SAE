@@ -270,3 +270,87 @@ hint entry or `--architecture` override; the existing `("S4", ...)`
 substring rule does not match the Ve naming.
 
 Full series write-up: [`docs/diary/series-V.md`](../../docs/diary/series-V.md).
+
+## Update — 2026-05-24: pre-T D1 scan (forward-queue #3) + Ve(4) confirmation
+
+### Ve(4) @ 10k
+
+Same recipe as Ve(1), 10k epochs. D1 numbers strengthen Ve(1)'s claim:
+
+| Metric | Ve(4) @10k | Ve(1) @6k | Δ |
+|---|---|---|---|
+| `safe_piece_recall` | **0.846** | 0.821 | +0.025 |
+| `forcing_loss_bottom_recall` | **0.968** | 0.957 | +0.011 |
+| `spearman_rho_mean` (n) | **0.610** (916) | 0.578 (924) | +0.032 |
+
+Both heads still improving at 10k under the persistent oracle. Ve(4)
+is the new overall champion (see `Research-status.md`).
+
+### Pre-T scan (O / S series; M series skipped — joint schema)
+
+Sharpens the H1 prediction. The cleanest reading is that pre-T runs
+land *below* Ve(2)/Ve(3)'s post-disable residual, i.e. **the oracle
+doesn't just preserve structure — it creates substantially more than
+MC supervision alone produces from scratch**.
+
+| Run | Trunk | `safe_piece_recall` | `forcing_loss_bottom_recall` (chance) | ρ̄ |
+|---|---|---|---|---|
+| OA(1) N=2 | Unified | 0.367 | 0.700 (**0.689 — at chance**) | 0.004 |
+| OA(2) N=3 | Unified | 0.443 | 0.892 (0.844) | 0.143 |
+| OA(3) N=4 | Unified | 0.362 | 0.863 (0.828) | 0.071 |
+| OA(4) N=12 | Unified | 0.353 | 0.817 (**0.811 — at chance**) | 0.006 |
+| Sa(1) deepConv | S1 | 0.364 | 0.777 (0.767) | 0.024 |
+| Sa(2) wideFC | S2 | 0.489 | 0.865 (0.759) | 0.195 |
+| **Sa(3) S4** | **S4** | **0.516** | **0.803 (0.693)** | **0.195** |
+| Ve(2/3) post-disable | S4 | 0.54 / 0.58 | 0.83 / 0.85 | 0.25 / 0.27 |
+| Ve(1) NEVER 6k | S4 | 0.821 | 0.957 (0.700) | 0.578 |
+| Ve(4) NEVER 10k | S4 | **0.846** | **0.968** | **0.610** |
+
+**Findings:**
+
+1. **Oracle gap is larger than the disable-residual.** Pre-T (no oracle
+   ever) lands at 0.35–0.52 safe-piece recall — Ve(2/3) (oracle then
+   off) at 0.54–0.58 — Ve(1/4) (oracle throughout) at 0.82–0.85. So MC
+   on its own can hit ~0.5 with the right trunk; the oracle then adds
+   another +0.30. The Ve(2/3) post-disable equilibrium is *higher*
+   than what a never-oracled run reaches on the same trunk.
+
+2. **Sa(3) S4 leads the pre-T pack** (0.516 / 0.195), validating the
+   structural-trunk choice for T/V on a metric the legacy match-outcome
+   Δ couldn't see. The Sa series finding "no Q_select gain" (2026-05-12
+   `series-S.md`) is **now overturned for Sa(3)** — relative to OA
+   baseline, +0.15 safe-piece recall and +0.17 ρ̄. Sa(1) deepConv stays
+   flat (0.024 ρ̄ ≈ OA baseline) — its prior +0.170 numeric Q_select Δ
+   really was a metric artefact.
+
+3. **N=2 and N=12 are at chance on forcing-loss detection** (OA(1):
+   0.700 vs chance 0.689; OA(4): 0.817 vs 0.811). N=2 starvation is
+   already documented (key takeaway #1). N=12 at chance is a *new
+   failure mode* — too many states per game, the per-state oracle
+   signal density may dilute. Worth pre-registering as a hypothesis
+   when Wa_oracleStates is queued.
+
+4. **The "Q_select saturation" frame is fully retired for pre-T runs.**
+   The select head was always doing *some* position-structure work
+   (above chance on forcing-loss detection in 5 of 7 pre-T runs), but
+   the legacy match-outcome Δ averaged it away. Promotion gates and
+   future readings of "Q_select looks flat" should use D1 fields
+   (`d1_safe_piece_recall` etc.) shipped inline since 2026-05-24, not
+   the legacy `q_select_winners` / `q_select_losers`.
+
+### Forward-queue action items, post 2026-05-24
+
+- **Item #1 (D1 in JSONL) — done.** `COMPUTE_D1_INLINE = True` in
+  `trainRL.py` (gated on `TRANSITION_SCHEMA == "unified_autoreg"`);
+  `build_checkpoint_record` / `build_final_record` now merge `d1_*`
+  fields via `compute_position_structure_record`. Default `n_states=200`
+  costs ~10s per checkpoint. Failures caught as `d1_error`. See
+  `CLAUDE.md` operational rules.
+- **Item #3 (D1 on pre-T) — done for O/S.** M-series (joint schema +
+  `Quarto_autoreg_bot`) still needs adapter work in `_common.py` before
+  D1 can run on it. Low priority since M is the displaced champion and
+  the O/S scan already locks the headline finding.
+- **Item #4 (Sa(3) 10k confirmation) — strengthened.** Sa(3)'s D1
+  leadership over OA / S1 / S2 is now load-bearing for the interpretability
+  substrate claim. A 10k re-run would test whether the +0.15 safe-piece
+  recall vs OA is stable across training lengths.

@@ -142,3 +142,80 @@ so the loader instantiates the S4 trunk rather than the default
 would fail to load with a `size mismatch for fc1.weight: [512,512] vs
 [128,512]` error. Future series running on Sa(3) need either their own
 hint entry or a `--architecture` CLI override.
+
+## Result — Ve(4) 10k confirmation, 2026-05-24
+
+`Ve_oracleAblation(4)0522_DISABLE_NEVER_10k` — same recipe as Ve(1)
+(Sa(3) + minimax depth=2, oracle always on) extended to EPOCHS=10000.
+Launched 2026-05-22 18:32, finished 2026-05-24 19:04 (~48.5 h wall).
+
+### WR and loss [DIRECT — from JSONL summaries]
+
+| Metric | Ve(4) @10k | Ve(1) @6k | Δ |
+|---|---|---|---|
+| WR vs BT final | **0.872** | 0.852 | +0.020 |
+| WR vs BT peak | **0.889** | 0.871 | +0.018 |
+| WR vs random final | **0.938** | 0.920 | +0.018 |
+| WR vs random peak | **0.948** | 0.929 | +0.019 |
+| WR trend vs BT (last 5k, pp/1000ep) | +0.65 ↑ (CI 0.51–0.78, p≈0) | +2.9 ↑ | slowing, still significant |
+| WR trend vs random (last 5k, pp/1000ep) | +0.44 ↑ (CI 0.36–0.52, p≈0) | — | still significant |
+| `loss_select` final | **0.041** | 0.048 | −0.007 |
+| `loss_place` final | 0.064 | — | — |
+
+### D1 position-structure recalls — 2026-05-24
+
+Diagnostic command:
+`python analysis/qselect_diagnostics/position_structure.py
+--exp 'Ve_oracleAblation(4)0522_DISABLE_NEVER_10k' --epoch 10000
+--n-states 500 --seed 1234` (identical params to Ve(1)/Ta(1) scans).
+
+| Metric | Ve(4) @10k | Ve(1) @6k | Ta(1) @4350 | Chance |
+|---|---|---|---|---|
+| `safe_piece_recall` | **0.846** | 0.821 | 0.807 | 0.114 |
+| `forcing_loss_bottom_recall` | **0.968** | 0.957 | 0.946 | 0.700 |
+| `spearman_rho_mean` (n) | **0.610** (916) | 0.578 (924) | 0.547 (896) | 0 |
+| `forcing_set_size_mean` | 5.97 | 5.90 | 5.83 | — |
+
+### Reading [INFERENTIAL]
+
+1. **Both heads keep improving with more oracle-supervised training.**
+   Place head: WR rises +2.0 pp final / +1.8 pp peak vs Ve(1)@6k.
+   Select head: D1 recalls and ρ̄ all rise. No sign of a ceiling at 10k
+   on either axis under this recipe.
+
+2. **WR trend deceleration is real but the run isn't saturated.**
+   Slope on `bot_loss-BT` dropped from Ve(1)'s +2.9 → +0.65 pp/1000ep
+   (a ~4× slowdown). CI excludes zero (0.51–0.78), so the model is
+   still learning, just on diminishing returns. Extrapolation: ~+3–5 pp
+   more WR available if you 2–3×'d the wall-clock again, but the
+   marginal cost per pp keeps growing.
+
+3. **D1 ceiling is not far.** `safe_piece_recall = 0.846` means the
+   argmax-Q_select picks a safe (non-forcing-loss) piece in ~85% of
+   decisive states. With mean forcing-set size ~6/14 available pieces,
+   chance-of-safe-pick is ~57% — the model is recovering ~67% of the
+   chance-to-perfect gap. The remaining 15% of errors are concentrated
+   in states where the oracle and the place-head's value estimate
+   disagree on the cost of taking a borderline piece; revisiting these
+   in interpretability work would be informative.
+
+4. **`forcing_loss_bottom_recall` is approaching the ceiling.** At
+   0.968, the model misses the "give the opponent a forcing piece"
+   class in only ~3% of states. Further D1 gains will have to come
+   from the safe-piece-recall and ρ̄ axes, not from this one.
+
+### Conclusions
+
+- **Ve(4) promoted to overall champion 2026-05-24**, superseding ME(2)
+  (which held the slot since 2026-04-29). Net delta vs ME(2): +13.5 pp
+  WR vs BT, +8.0 pp WR vs random, +73.2 pp D1 safe_piece_recall
+  (chance ≈ 0.11; ME(2) not yet measured — predicted to land near
+  Ve(2)/Ve(3)'s ~0.55 by the pre-T conjecture in forward-queue item
+  #3).
+- **Forward-queue item #1 (Ve(4) 10k confirmation) closed.** Promotion
+  done in `Research-status.md`.
+- **Next training axis: Wa_oracleStates** (N_LAST_STATES sweep on the
+  Ve recipe) — promoted to top of the forward queue. Run *after* the
+  D1 metric ships into the JSONL summary (forward-queue item #1, now
+  bumped to top priority) so the new gate is computed inline on every
+  Wa checkpoint.

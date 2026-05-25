@@ -214,6 +214,44 @@ def summarize_q_outcome(
     }
 
 
+def _d1_subrecord(policy_net, d1_config: dict | None) -> dict | None:
+    """Run the D1 position-structure diagnostic in-process.
+
+    Returns a flat dict of just the D1 metrics we want surfaced in the
+    JSONL summary, or ``None`` if D1 is disabled / unavailable / yields
+    no usable states. Failures are non-fatal: training must not crash if
+    the diagnostic can't run on a given recipe.
+    """
+    if policy_net is None or d1_config is None or not d1_config.get("enabled", False):
+        return None
+    try:
+        from analysis.qselect_diagnostics.position_structure import (
+            compute_position_structure_record,
+        )
+        metrics = compute_position_structure_record(
+            policy_net,
+            n_states=d1_config.get("n_states", 200),
+            n_pieces_min=d1_config.get("n_pieces_min", 2),
+            n_last_states=d1_config.get("n_last_states", 4),
+            oracle_depth=d1_config.get("oracle_depth", 2),
+            seed=d1_config.get("seed", 1234),
+        )
+    except Exception as exc:  # noqa: BLE001 — diagnostic must never break training
+        return {"d1_error": f"{type(exc).__name__}: {exc}"}
+    if metrics is None:
+        return None
+    rho = metrics.get("spearman_rho") or {}
+    return {
+        "d1_safe_piece_recall": metrics.get("safe_piece_recall"),
+        "d1_forcing_loss_bottom_recall": metrics.get("forcing_loss_bottom_recall"),
+        "d1_forcing_loss_bottom_chance": metrics.get("forcing_loss_bottom_chance"),
+        "d1_spearman_rho_mean": rho.get("mean"),
+        "d1_spearman_rho_n": rho.get("n"),
+        "d1_n_states_decisive": metrics.get("n_states_decisive"),
+        "d1_n_states_any_forcing": metrics.get("n_states_any_forcing"),
+    }
+
+
 def build_checkpoint_record(
     epoch: int,
     loss_data: dict,
@@ -222,8 +260,18 @@ def build_checkpoint_record(
     q_values_history: dict,
     extra: dict | None = None,
     smooth_window: int = 100,
+    policy_net=None,
+    d1_config: dict | None = None,
 ) -> dict:
-    """Build a ``type=checkpoint`` record from the in-memory training state."""
+    """Build a ``type=checkpoint`` record from the in-memory training state.
+
+    If ``policy_net`` and ``d1_config={"enabled": True, ...}`` are passed,
+    runs the D1 position-structure diagnostic in-process and merges
+    ``d1_safe_piece_recall``, ``d1_forcing_loss_bottom_recall``,
+    ``d1_spearman_rho_mean`` (+ a few accounting fields) into the record.
+    D1 failures are caught and surfaced as ``d1_error`` rather than
+    crashing training.
+    """
     wr_smoothed = {
         str(rival): _smoothed_tail(values, smooth_window)
         for rival, values in (win_rate or {}).items()
@@ -263,6 +311,9 @@ def build_checkpoint_record(
         "q_place_winners": qplace["win"],
         "q_place_losers": qplace["loss"],
     }
+    d1 = _d1_subrecord(policy_net, d1_config)
+    if d1 is not None:
+        rec.update(d1)
     if extra:
         rec.update(extra)
     return _to_python(rec)
@@ -280,9 +331,15 @@ def build_final_record(
     extra: dict | None = None,
     final_window_frac: float = 0.10,
     smooth_window_final: int = 100,
+    policy_net=None,
+    d1_config: dict | None = None,
 ) -> dict:
     """Build a ``type=final`` record. ``final_window_frac`` controls the
-    fraction of trailing epochs used for ``wr_final`` (default 10%)."""
+    fraction of trailing epochs used for ``wr_final`` (default 10%).
+
+    If ``policy_net`` and ``d1_config={"enabled": True, ...}`` are passed,
+    runs D1 at end-of-training and merges the D1 fields into the record
+    (same key prefix as ``build_checkpoint_record``)."""
     wr_final: dict[str, float | None] = {}
     wr_peak: dict[str, float | None] = {}
     wr_trend: dict[str, dict[str, float | bool | None]] = {}
@@ -346,6 +403,9 @@ def build_final_record(
         "gates": gates or {},
         "config": config or {},
     }
+    d1 = _d1_subrecord(policy_net, d1_config)
+    if d1 is not None:
+        rec.update(d1)
     if extra:
         rec.update(extra)
     return _to_python(rec)

@@ -8,33 +8,52 @@ result paragraphs here under "Recent results" when a sweep concludes.
 
 ## Champion
 
-- **`ME_endgame(2)0429_ENDGAME_FRACTION_0.5`** — 73.7% WR vs `bot_loss-BT`,
-  85.8% WR vs `bot_random`, loss 0.207. Uses the M-series decoupled-autoreg
-  trunk (`QuartoCNNAutoreg`) with `td_place_mc_select` targets,
-  N_LAST_STATES_INIT=2 curriculum to N=4, ENDGAME_FRACTION=0.5,
-  N_LAST_STATES_ENDGAME=2, LR=7e-4, TAU=0.01, 5000 epochs.
-- **Interpretability substrate of record:** `OA_unifiedAux(1)0509_N_LAST_STATES_INIT_2`
-  — 66.3% WR vs `bot_loss-BT`. Same loss / schema family as ME(2) but with the
-  unified 32-d phase-stable aux (`[offered_one_hot ; available_mask]`) and no
-  phase embedding. 7pp behind ME(2) on WR; standing trade for SAE-able activations.
-- **Candidate replacement (pending 10k confirmation):**
-  `Ve_oracleAblation(1)0519_DISABLE_NEVER` — **85.2% WR vs `bot_loss-BT`,
-  92.0% vs `bot_random`** (peaks 87.1% / 92.9%, trend still rising at
-  +2.9 pp/1000ep at epoch 6000). Same Sa(3) + minimax-depth-2 recipe as
-  Ta(1) but extended to 6000 epochs cleanly. **D1 confirms Q_select
-  position-structure recall holds (0.82 safe-piece recall vs 0.81 for
-  Ta(1) @ 4350)** — see `docs/diary/series-V.md`. Ve(4) launched
-  2026-05-22 at 10000 epochs to confirm before formal promotion over
-  ME(2).
-- **Prior candidate (superseded by Ve(1)):** `Ta_minimaxSelect(1)0514_DEPTH_2`
-  — 80.3% WR vs BT, peak 81.5%, truncated at 4000 epochs. Ve(1) is the
-  clean continuation; same recipe modulo 2000 more epochs of oracle
-  supervision.
+- **`Ve_oracleAblation(4)0522_DISABLE_NEVER_10k`** — **87.2% WR vs `bot_loss-BT`
+  (peak 88.9%), 93.8% vs `bot_random` (peak 94.8%)**, loss 0.053,
+  `loss_select` 0.041. Same recipe as Ve(1) — Sa(3) unified-autoreg trunk
+  (`QuartoCNNAutoregUnifiedS4`) with `td_place_minimax_select` targets
+  at depth=2, oracle always on — extended to 10000 epochs. Trends still
+  rising at +0.65 / +0.44 pp/1000ep against BT / random at run end.
+  **D1: best on record — `safe_piece_recall=0.846`,
+  `forcing_loss_bottom_recall=0.968`, ρ̄=0.610** (vs Ve(1) @6k: 0.821,
+  0.957, 0.578). Both heads improve with more oracle-supervised training.
+  Supersedes ME(2) by **+13.5 pp WR vs BT** and Ve(1) by +2.0 pp WR / +2.5
+  pp safe-piece recall. See `docs/diary/series-V.md`.
+- **Prior champion (superseded 2026-05-24):**
+  `ME_endgame(2)0429_ENDGAME_FRACTION_0.5` — 73.7% WR vs BT, 85.8% vs
+  random. Held the champion slot 2026-04-29 → 2026-05-24. M-series
+  decoupled-autoreg trunk, no oracle supervision. Retained as the
+  reference point for any non-oracle recipe.
+- **Interpretability substrate of record:**
+  `OA_unifiedAux(1)0509_N_LAST_STATES_INIT_2` — 66.3% WR vs BT. Unified
+  32-d phase-stable aux (`[offered_one_hot ; available_mask]`); SAE-able
+  activations. Now 20.9 pp behind Ve(4) on WR — gap widened by the
+  oracle recipe; revisit as a candidate for "oracle + unified-aux"
+  substrate after Wa_oracleStates lands.
+- **Prior candidates (superseded by Ve(4)):**
+  - `Ve_oracleAblation(1)0519_DISABLE_NEVER` — 85.2% / 87.1% peak @6000,
+    +2.9 pp/1000ep. Ve(4) is the clean 10k continuation; same recipe.
+  - `Ta_minimaxSelect(1)0514_DEPTH_2` — 80.3% WR, truncated at 4000.
+    Ve series is the clean continuation modulo training length.
 - **Earlier candidate:** `Sa_archScan(3)0512_ARCH_S4_uniform512` — 73.5%
-  WR; held as interpretability substrate of record since both Ta(1) and
-  Ve(1) use the Sa(3) trunk.
+  WR; trunk used by all T/V runs.
 
-## Current Open Problem — Q_select "saturation"
+## Current Open Problem — Q_select "saturation" [**RESOLVED as metric artefact, 2026-05-24**]
+
+> **[2026-05-24 — closed.]** D1 has now scanned every relevant family
+> (T, V, O, S). Pre-T runs (O, S — never oracle-supervised) land at
+> `safe_piece_recall = 0.35–0.52` (chance 0.11) with Sa(3) S4 leading
+> (0.516). Oracle-disabled runs Ve(2/3) sit at 0.54–0.58. Oracle-always-on
+> runs Ve(1/4) sit at 0.82–0.85. The select head was always doing
+> *some* position-structure work; the legacy match-outcome-conditioned
+> Δ averaged it away. **The "Q_select saturation" framing is retired.**
+> Future readings should use the inline `d1_*` JSONL fields shipped
+> since 2026-05-24 (see `CLAUDE.md` operational rules). Pre-T scan
+> table + analysis: `analysis/qselect_diagnostics/REPORT.md` → "Pre-T
+> scan". M-series D1 still pending — needs adapter work for the joint
+> schema, but is low-priority since OA/Sa already locked the headline.
+>
+> Below preserved for historical context only.
 
 > **[2026-05-19 — diagnostic suite returned: H1 (metric artefact) supported,
 > H2 and H3 falsified.]** See
@@ -124,7 +143,7 @@ at least one of D1/D2/D3 returning evidence for an architectural mechanism.
 | G | separate_bellman | joint | done — `series-FG.md` |
 | H–K | terminal mask / unbound / final / coupled | joint | done — `series-HIJK.md` |
 | L | mc_select | joint | done — `series-L.md` |
-| M | decoupled_autoreg | `QuartoCNNAutoreg*` + `Quarto_autoreg_bot` | **champion** — `series-M.md` |
+| M | decoupled_autoreg | `QuartoCNNAutoreg*` + `Quarto_autoreg_bot` | prior champion (2026-04-29 → 2026-05-24) — `series-M.md` |
 | N | shared-trunk diagnostics | M-series | done — `series-N.md` |
 | O | unified_autoreg | `QuartoCNNAutoregUnified*` + `Quarto_unified_bot` | done — `series-O.md`, `docs/diary/2026-05-08_unified-aux-trunk.md` |
 | P | frozen-trunk select | M-series | done (negative) — `series-P.md` |
@@ -133,14 +152,41 @@ at least one of D1/D2/D3 returning evidence for an architectural mechanism.
 | S | structural trunk variants | OA-family | done (mixed) — `series-S.md`; Sa(1) "+0.170 Δ" re-interpreted as artefact 2026-05-18 |
 | T | minimax-oracle select target | Sa(3) | done — `series-T.md`; Ta(1) = **WR champion candidate**, but Q_select metric still flat |
 | **U?** | **Q_select diagnostics (not a training series)** | n/a | **done 2026-05-19** — `analysis/qselect_diagnostics/REPORT.md` — H1 supported, H2/H3 falsified |
-| V | minimax-oracle ablation mid-training | Sa(3) + T-recipe | **done 2026-05-21/22** — `series-V.md`; Ve(1) = **new WR champion candidate (85.2%)**, D1 confirms oracle is persistent driver not warmup; Ve(4) 10k confirmation in flight |
+| V | minimax-oracle ablation mid-training | Sa(3) + T-recipe | **done 2026-05-24** — `series-V.md`; Ve(4) @10k = **new champion (87.2% WR, D1 best-on-record)** — supersedes ME(2); Ve(1)/(2)/(3) D1 confirmed oracle is persistent driver not warmup |
 
 ## Recent results
+
+### Ve_oracleAblation(4) — 10k confirmation, 2026-05-24
+
+Same recipe as Ve(1) (Sa(3) + minimax depth=2, oracle always on) at
+EPOCHS=10000. Full write-up: [`docs/diary/series-V.md`](docs/diary/series-V.md).
+
+| Metric | Ve(4) @10k | Ve(1) @6k | Δ |
+|---|---|---|---|
+| WR vs BT (final / peak) | **87.2% / 88.9%** | 85.2% / 87.1% | +2.0 / +1.8 |
+| WR vs random (final / peak) | **93.8% / 94.8%** | 92.0% / 92.9% | +1.8 / +1.9 |
+| WR trend vs BT (pp/1000ep, last 5k) | +0.65 ↑ (CI 0.51–0.78) | +2.9 ↑ | slowing but still positive |
+| `loss_select` | **0.041** | 0.048 | −0.007 |
+| D1 `safe_piece_recall` | **0.846** | 0.821 | +0.025 |
+| D1 `forcing_loss_bottom_recall` | **0.968** | 0.957 | +0.011 |
+| D1 `spearman_rho_mean` (n) | **0.610** (916) | 0.578 (924) | +0.032 |
+
+**Reading.** Longer oracle-supervised training keeps improving both the
+place head (WR) and the select head (D1 position-structure encoding).
+Trend slope on WR has decelerated by ~4× from Ve(1)'s window but
+remains positive and significant — model is not saturated at 10k. D1
+deltas are smaller than the Ve(1)→Ve(2/3) gap (~30 pp recall) but all
+positive, with the safe-piece-recall ceiling now within 0.15 of the
+oracle's argmax.
+
+**Action.** Ve(4) **formally promoted to champion** 2026-05-24,
+superseding ME(2). Next-up training axis: N_LAST_STATES sweep on the
+Ve recipe (Wa_oracleStates), since N directly modulates how many
+oracle-supervised select transitions per game enter the buffer.
 
 ### Ve_oracleAblation — 2026-05-21 (3 runs @ 6000 epochs) + D1 follow-up 2026-05-22
 
 Knob `MINIMAX_DISABLE_AFTER_EPOCH ∈ {None, 2000, 4000}` on the Ta(1) recipe.
-Full write-up: [`docs/diary/series-V.md`](docs/diary/series-V.md).
 
 | Run | Disable @ | `loss_select` | WR vs BT (final / peak) | Trend pp/1000ep | D1 `safe_piece_recall` | D1 `spearman_rho_mean` |
 |---|---|---|---|---|---|---|
@@ -159,11 +205,6 @@ MC pulls Q_select toward a fixed equilibrium below the oracle-supervised
 one. `loss_select` snaps from the minimax 0.05 floor back to the R/S 0.24
 floor within a single checkpoint of the disable epoch, independently
 re-confirming that the 0.24 floor is a target-noise property.
-
-**Action.** Ve(1) is the new **WR champion candidate** (85.2% / 92.0%,
-still rising). 10k confirmation launched as
-`Ve_oracleAblation(4)0522_DISABLE_NEVER_10k` 2026-05-22 before formal
-promotion over ME(2).
 
 ### Q_select diagnostic suite — 2026-05-19 (on Ta(1) @ epoch 4350)
 
@@ -255,34 +296,50 @@ Saturation is **not** a head-level pathology. Full write-up in
 
 ## Forward queue
 
-1. **Ve(4) 10k confirmation — in flight** — launched 2026-05-22 as
-   `Ve_oracleAblation(4)0522_DISABLE_NEVER_10k`. Same recipe as Ve(1) at
-   EPOCHS=10000. Required before formal promotion of Ve(1) over ME(2) as
-   overall champion.
-2. **Replace Q_select gate with D1 position-structure recalls** — the
-   match-outcome-conditioned Δ in
-   [`QuartoRL/results_io.py:192-214`](QuartoRL/results_io.py) is
-   uninformative (verified 2026-05-19 by D1 on Ta(1); reaffirmed
-   2026-05-22 by D1 on Ve). Add `safe_piece_recall` and
-   `forcing_loss_bottom_recall` to the JSONL summary so all future runs
-   ship the right gate by default. Suggested gate: `safe_piece_recall` ≥
-   0.70 (chance ≈ 0.11) for promotion.
-3. **D1 on older Q_select-flat runs (M, S, OA)** — cheap; the diagnostic
-   accepts any unified-autoreg checkpoint. Ve sharpens the prediction:
-   pre-T runs (never oracle-supervised) should land near Ve(2)/Ve(3)'s
-   ~0.55 safe-piece recall — not near Ve(1)'s 0.82. Pre-T architecture
-   hints need adding to `analysis/qselect_diagnostics/_common.py:83-89`
-   (or use `--architecture` overrides).
-4. **Sa(3) confirmation run** — re-run `Sa_archScan(3)0512_ARCH_S4_uniform512`
-   at 10k epochs to lock the interpretability-substrate-of-record claim
-   independently of Ta(1)/Ve(1). Lower priority since both use the Sa(3)
-   trunk.
-5. **Faithful-path D2 (buffer-dump hook)** — optional config-gated hook in
+1. **Wa_oracleStates — N_LAST_STATES sweep on the Ve recipe** — Ve
+   recipe + minimax depth=2 oracle + N_LAST_STATES_INIT ∈ {3, 4, 6, 8}
+   at 10k epochs. N directly modulates how many oracle-supervised
+   select transitions per game enter the buffer; never tested under
+   T/V. Hypothesis: larger N raises both D1 recall and WR by giving the
+   oracle more opportunities per game; risk is replay-buffer
+   distribution shift à la Ac_fineShallow. **Pre-T D1 sharpens the
+   prior:** OA(4) N=12 lands at chance on `forcing_loss_bottom_recall`
+   without oracle — N=12 may dilute per-state signal even with oracle.
+   Cap the sweep at N=8 unless the N=6 result clearly trends up.
+2. **Sa(3) 10k confirmation run** — re-run
+   `Sa_archScan(3)0512_ARCH_S4_uniform512` at 10k epochs to lock the
+   interpretability-substrate-of-record claim. **Priority raised** —
+   the pre-T D1 scan (forward-queue #3, done 2026-05-24) shows Sa(3)
+   leads the pre-T pack on D1 (`safe_piece_recall=0.516` vs OA ~0.36),
+   reversing the prior series-S verdict that Sa(3) "no Q_select gain".
+   Worth confirming the +0.15 recall lead is stable across training
+   length before promoting Sa(3) as a *non-oracle* interp substrate.
+3. **D1 on M-series (joint schema)** — requires adapter work in
+   `analysis/qselect_diagnostics/_common.py` to support `Quarto_autoreg_bot`
+   + the joint-schema `gen_experience` path. Low priority — M is the
+   displaced champion, and the OA/Sa scan already locked the headline
+   finding that pre-oracle runs sit at 0.35–0.52 safe-piece recall.
+4. **Faithful-path D2 (buffer-dump hook)** — optional config-gated hook in
    `trainRL.py` to log the actual replay buffer at fixed checkpoints. The
    2026-05-19 D2 verdict was on the cheap path; faithful path would lock
    the H2-falsified finding for early-training phases too.
 
-**Dropped 2026-05-22 (after Ve):**
+**Dropped 2026-05-24 (after Ve(4) + D1 ship):**
+
+- **"Ve(4) 10k confirmation"** — done; Ve(4) promoted to champion.
+- **"Replace Q_select gate with D1 recalls (item #1 of 2026-05-22 queue)"**
+  — done; `COMPUTE_D1_INLINE = True` in `trainRL.py`, `build_checkpoint_record`
+  and `build_final_record` merge `d1_safe_piece_recall`,
+  `d1_forcing_loss_bottom_recall`, `d1_spearman_rho_mean` into every
+  future checkpoint event. Gated on `TRANSITION_SCHEMA == "unified_autoreg"`.
+  See `CLAUDE.md` operational rules + [[d1-jsonl-contract]] memory.
+- **"D1 on O/S pre-T runs (item #3 of 2026-05-22 queue)"** — done.
+  Pre-T runs land 0.35–0.52 safe-piece recall (chance 0.11); Sa(3)
+  leads (0.516), OA(1) N=2 and OA(4) N=12 at chance on forcing-loss
+  detection. Full table in `analysis/qselect_diagnostics/REPORT.md`
+  → "Pre-T scan".
+
+**Dropped 2026-05-22 (after Ve(1/2/3)):**
 
 - **"Oracle as warmup that can be removed"** — Ve(2)/Ve(3) refute this on
   both WR (~6–7pp cap below Ve(1)) and D1 (recall drops ~30pp post-disable).
@@ -335,9 +392,10 @@ Two-part name: **`XY_description`**.
 3. **Curriculum jumps from N=2 to higher N catastrophically forget** (Ac_fineShallow). Replay-buffer distribution shift, not LR.
 4. **Endgame anchor buffer (ENDGAME_FRACTION=0.5, N_LAST_STATES_ENDGAME=2)** is the single change that unlocked 73% WR (M-series → ME).
 5. **Loss reweighting (R) is rejected as a fix for Q_select saturation.** `loss_select` has a floor near 0.24 invariant to a 30× swing in α_select / α_place; reweighting buys Q_select Δ ≤ +0.04 at a one-way WR cost. Gradient starvation is not the mechanism.
-6. **Structural trunk changes (S) close the unified-aux WR tax but not Q_select saturation.** Sa(3) matches ME(2) WR with the unified-aux substrate (+7pp over OA(1)) — new interpretability champion candidate. Sa(1) deepConv produced the largest numeric Q_select Δ on record (+0.170) but with no visible plate separation and a WR collapse. The select-side gap is not where deeper trunks alone close it.
+6. **Structural trunk changes (S) close the unified-aux WR tax AND lift Q_select position-structure (2026-05-24 D1 update).** Sa(3) S4 matches ME(2) WR with the unified-aux substrate (+7pp over OA(1)) — interpretability champion candidate. **Pre-T D1 scan now shows Sa(3) also leads the pre-T pack on `safe_piece_recall` (0.516 vs OA ~0.36) and ρ̄ (0.195 vs ~0.05) — reversing the prior series-S "no Q_select gain" verdict, which was a legacy-Δ artefact.** Sa(1) deepConv stays flat on D1 (0.024 ρ̄ ≈ OA baseline), so its +0.170 numeric Q_select Δ from 2026-05-12 really was a metric artefact as suspected.
 7. **Target noise (T-series) was half the story.** Clean minimax targets drove `loss_select` from the 0.24 R/S floor down to 0.055 — confirming the floor was target noise. But `Q_select` Δ stayed ≈0 under the match-outcome metric, and Ta(1) became a new WR champion candidate (80.3%) *via the place head*, not via a now-discriminative Q_select. The "Q_select saturation" open problem is now **under-determined between metric artefact (H1), buffer signal sparsity (H2), and multitask interference (H3)** — see `analysis/qselect_diagnostics/PLAN.md`. **[INFERENTIAL — written 2026-05-18 by an AI agent revisiting its own prior claims; verify with diagnostics before treating as load-bearing.]**
 8. **"Q_select saturation" was largely a metric artefact (2026-05-19).** The D1 diagnostic on Ta(1) @ epoch 4350 shows `safe_piece_recall = 0.81` vs chance 0.11, `forcing_loss_bottom_recall = 0.95` vs chance 0.70, and Spearman ρ̄ = 0.55 — the Q_select head ranks pieces correctly. The Δ-on-match-outcome metric averaged over many functionally neutral states and hid this. H2 (sparsity) and H3 (interference) were both falsified by D2 (95% buffer nonzero) and D3 (decoupled select-only net underperforms the joint net at 8× training data scale). Full write-up: [`analysis/qselect_diagnostics/REPORT.md`](analysis/qselect_diagnostics/REPORT.md). [DIRECT for numbers; interpretation AI-drafted.]
 9. **The minimax oracle is a *persistent driver*, not a removable warmup (2026-05-22, Ve series).** Ve(1) NEVER (oracle on throughout) reaches 85.2% WR and D1 `safe_piece_recall=0.82`. Disabling the oracle mid-training (Ve(2) @ 2000, Ve(3) @ 4000) caps WR at ~78–79% and decays D1 safe-piece recall to ~0.55 — well above chance 0.11 (MC holds *some* of the imprint) but ~30pp below the always-on run. Late disable ≈ early disable, indicating MC pulls Q_select toward a fixed sub-oracle equilibrium. Plan for ongoing oracle cost in production training recipes. Full write-up: [`docs/diary/series-V.md`](docs/diary/series-V.md).
+10. **Longer oracle-supervised training keeps lifting *both* heads (2026-05-24, Ve(4) @10k).** Extending the Ve(1) recipe 6k → 10k epochs raises WR vs BT 85.2% → **87.2%** (peak 87.1% → **88.9%**) and D1 `safe_piece_recall` 0.821 → **0.846** (chance 0.11), `forcing_loss_bottom_recall` 0.957 → **0.968**, ρ̄ 0.578 → **0.610**. WR trend slope decelerates ~4× (Ve(1) +2.9 → Ve(4) +0.65 pp/1000ep) but stays significantly positive — no ceiling at 10k. **Ve(4) is the new overall champion**, superseding ME(2) by +13.5 pp WR.
 
 For each of these, the originating series file in `docs/diary/` carries the full evidence.
