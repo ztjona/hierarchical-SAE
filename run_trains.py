@@ -104,35 +104,57 @@ MULTI_PARAMS = None
 # Base recipe = Ta(1): unified_autoreg + QuartoCNNAutoregUnifiedS4 + depth-2
 # minimax select target. EPOCHS bumped to 6000 so each variant has ≥2000
 # post-ablation epochs.
+# Wa_oracleStates — N_LAST_STATES sweep on the Ve recipe (Sa(3) S4 trunk +
+# minimax depth=2 oracle always on, 10k epochs). Ve(4) already covers N=4;
+# this sweep tests higher N to see if more oracle-supervised transitions per
+# game helps or dilutes. Pre-T D1 showed OA(4) N=12 at chance without oracle;
+# with oracle the picture may differ. [DONE 2026-06-04 — series-W.md]
+#
+# Xa_levers — 3-arm overnight competence-lever screen. Base = Ve(4) champion
+# recipe (QuartoCNNAutoregUnifiedS4, N_LAST_STATES_INIT=4, depth-2 minimax
+# oracle always on) at 6000 epochs (matches the Ve(1)@6k baseline). Each arm
+# changes EXACTLY ONE thing; attribution is each arm's delta vs Ve(1)@6k.
+# Motivated by the 2026-06-04 loss autopsy (analysis/competence_audit/REPORT.md):
+# ~⅔ of vs-random losses are forced positions, ~⅓ avoidable select blunders,
+# and the place head misses 6.7% of immediate wins. λ/margin are screen
+# defaults (0.5/0.5) — tune on the winning lever's deep run. See series-X.md.
+#   X(1) PLACE_WIN  : aux place-win hinge (LAMBDA_PLACE_WIN), depth 2.
+#   X(2) DEPTH_3    : deeper select oracle (MINIMAX_SELECT_DEPTH=3), no aux.
+#   X(3) SEL_MARGIN : aux select-margin hinge (LAMBDA_SEL_MARGIN), depth 2.
 MULTI_PARAMS = [
     {
         "ARCHITECTURE": "QuartoCNNAutoregUnifiedS4",
         "USE_MINIMAX_SELECT_TARGET": True,
-        "EPOCHS": "6_000",
+        "MINIMAX_SELECT_DEPTH": 2,
         "MINIMAX_DISABLE_AFTER_EPOCH": None,
-        "_label": "DISABLE_NEVER",
+        "N_LAST_STATES_INIT": 4,
+        "EPOCHS": "6_000",
+        "LAMBDA_PLACE_WIN": 0.5,
+        "LAMBDA_SEL_MARGIN": 0.0,
+        "_label": "PLACE_WIN",
     },
     {
         "ARCHITECTURE": "QuartoCNNAutoregUnifiedS4",
         "USE_MINIMAX_SELECT_TARGET": True,
+        "MINIMAX_SELECT_DEPTH": 3,
+        "MINIMAX_DISABLE_AFTER_EPOCH": None,
+        "N_LAST_STATES_INIT": 4,
         "EPOCHS": "6_000",
-        "MINIMAX_DISABLE_AFTER_EPOCH": 2000,
-        "_label": "DISABLE_2000",
+        "LAMBDA_PLACE_WIN": 0.0,
+        "LAMBDA_SEL_MARGIN": 0.0,
+        "_label": "DEPTH_3",
     },
     {
         "ARCHITECTURE": "QuartoCNNAutoregUnifiedS4",
         "USE_MINIMAX_SELECT_TARGET": True,
+        "MINIMAX_SELECT_DEPTH": 2,
+        "MINIMAX_DISABLE_AFTER_EPOCH": None,
+        "N_LAST_STATES_INIT": 4,
         "EPOCHS": "6_000",
-        "MINIMAX_DISABLE_AFTER_EPOCH": 4000,
-        "_label": "DISABLE_4000",
+        "LAMBDA_PLACE_WIN": 0.0,
+        "LAMBDA_SEL_MARGIN": 0.5,
+        "_label": "SEL_MARGIN",
     },
-    {
-      "ARCHITECTURE": "QuartoCNNAutoregUnifiedS4",
-      "USE_MINIMAX_SELECT_TARGET": True,
-      "EPOCHS": "10_000",
-      "MINIMAX_DISABLE_AFTER_EPOCH": None,
-      "_label": "DISABLE_NEVER_10k",
-  },
 ]
 
 # Path to the original training script

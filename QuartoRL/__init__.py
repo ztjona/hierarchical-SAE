@@ -1,6 +1,7 @@
 from .RL_functions import (
     gen_experience,
     DQN_training_step,
+    win_margin_aux_loss,
     TRANSITION_SCHEMA_JOINT,
     TRANSITION_SCHEMA_DECOUPLED_AUTOREG,
     TRANSITION_SCHEMA_UNIFIED_AUTOREG,

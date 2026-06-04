@@ -186,6 +186,65 @@ def _valid_position_mask(board_state: str) -> np.ndarray:
     return mask
 
 
+def _winning_cell_mask(board_state: str, offered_piece: int, mode_2x2: bool) -> np.ndarray:
+    """16-d place-action mask: 1 at empty cells where placing ``offered_piece``
+    wins immediately, else 0.
+
+    Indexed by placement action (board position index), matching
+    :func:`_valid_position_mask`. Frozen 1-ply win target for the X(1)
+    place-win lever; all-zeros when there is no offered piece or no winning
+    cell exists.
+    """
+    mask = np.zeros(16, dtype=np.float32)
+    if offered_piece is None or offered_piece < 0:
+        return mask
+    from quartopy import Piece
+
+    board = Board.serialized_2_board(board_state)
+    piece = Piece.from_index(int(offered_piece))
+    for idx in range(16):
+        r, c = board.get_position_index(idx)
+        if board.is_empty(r, c):
+            board.put_piece(piece, r, c)
+            won, _ = board.check_win(mode_2x2=mode_2x2)
+            board.board[r][c] = 0  # undo (remove_piece is storage-only)
+            if won:
+                mask[idx] = 1.0
+    return mask
+
+
+def _hot_piece_mask(
+    board_state: str, available_pieces: set[int], mode_2x2: bool
+) -> np.ndarray:
+    """16-d select-action mask: 1 at available pieces that are *hot* — giving
+    one lets the opponent complete a line in some empty cell — else 0.
+
+    Indexed by piece index, matching :func:`_available_pieces_mask`. Frozen
+    1-ply safety target for the X(3) select-margin lever.
+    """
+    mask = np.zeros(16, dtype=np.float32)
+    if not available_pieces:
+        return mask
+    from quartopy import Piece
+
+    board = Board.serialized_2_board(board_state)
+    empties: list[tuple[int, int]] = []
+    for idx in range(16):
+        r, c = board.get_position_index(idx)
+        if board.is_empty(r, c):
+            empties.append((r, c))
+    for p_idx in available_pieces:
+        piece = Piece.from_index(int(p_idx))
+        for (r, c) in empties:
+            board.put_piece(piece, r, c)
+            won, _ = board.check_win(mode_2x2=mode_2x2)
+            board.board[r][c] = 0  # undo (remove_piece is storage-only)
+            if won:
+                mask[int(p_idx)] = 1.0
+                break
+    return mask
+
+
 def _actor_outcome(player_pos: str, match_result: str) -> float:
     if match_result == "Tie":
         return 0.0
@@ -398,6 +457,8 @@ def gen_experience(
     TRANSITION_SCHEMA: str = TRANSITION_SCHEMA_JOINT,
     COLLECT_BOARDS: bool = False,
     select_oracle=None,
+    emit_place_win: bool = False,
+    emit_hot_mask: bool = False,
 ) -> TensorDict | tuple[TensorDict, list[tuple[Board, Board]]]:
     """
     Generates experience by having two bots play against each other. The experience is returned as a TensorDict.
@@ -464,6 +525,8 @@ def gen_experience(
             REWARD_FUNCTION_TYPE=REWARD_FUNCTION_TYPE,
             COLLECT_BOARDS=COLLECT_BOARDS,
             select_oracle=select_oracle,
+            emit_place_win=emit_place_win,
+            emit_hot_mask=emit_hot_mask,
         )
     if select_oracle is not None and TRANSITION_SCHEMA == TRANSITION_SCHEMA_JOINT:
         raise NotImplementedError(
@@ -817,6 +880,8 @@ def gen_experience_unified_autoreg(
     REWARD_FUNCTION_TYPE: str = "propagate",
     COLLECT_BOARDS: bool = False,
     select_oracle=None,
+    emit_place_win: bool = False,
+    emit_hot_mask: bool = False,
 ):
     """Generate phase-decoupled transitions with phase-stable 32-d aux.
 
@@ -897,6 +962,16 @@ def gen_experience_unified_autoreg(
                     target_sel_minimax = np.zeros(16, dtype=np.float32)
                     target_sel_minimax_mask = np.zeros(16, dtype=np.float32)
 
+                # X(3) frozen 1-ply hot-piece target over the pre-removal
+                # available set, on the current board (matches the oracle's
+                # decision set above).
+                if emit_hot_mask:
+                    target_hot_piece = _hot_piece_mask(
+                        state_board, available_pieces, mode_2x2
+                    )
+                else:
+                    target_hot_piece = np.zeros(16, dtype=np.float32)
+
                 available_pieces.remove(action)
                 pending_piece = action
 
@@ -924,6 +999,8 @@ def gen_experience_unified_autoreg(
                         "outcome": outcome,
                         "target_sel_minimax": target_sel_minimax,
                         "target_sel_minimax_mask": target_sel_minimax_mask,
+                        "target_place_win": np.zeros(16, dtype=np.float32),
+                        "target_hot_piece": target_hot_piece,
                     }
                 )
                 joint_state_index += 1
@@ -940,6 +1017,15 @@ def gen_experience_unified_autoreg(
                 state_aux = _unified_aux(pending_piece, available_pieces)
                 valid_mask = _valid_position_mask(current_board)
                 action = int(move["position_index"])
+
+                # X(1) frozen 1-ply win target: cells where placing the in-hand
+                # piece wins immediately.
+                if emit_place_win:
+                    target_place_win = _winning_cell_mask(
+                        state_board, pending_piece, mode_2x2
+                    )
+                else:
+                    target_place_win = np.zeros(16, dtype=np.float32)
 
                 next_state_board = move["board_after"]
                 done = move_idx == len(move_history) - 1
@@ -975,6 +1061,8 @@ def gen_experience_unified_autoreg(
                         "outcome": outcome,
                         "target_sel_minimax": np.zeros(16, dtype=np.float32),
                         "target_sel_minimax_mask": np.zeros(16, dtype=np.float32),
+                        "target_place_win": target_place_win,
+                        "target_hot_piece": np.zeros(16, dtype=np.float32),
                     }
                 )
 
@@ -1079,6 +1167,14 @@ def gen_experience_unified_autoreg(
             ),
             "target_sel_minimax_mask": torch.tensor(
                 np.stack(p_all["target_sel_minimax_mask"].to_list()),
+                dtype=torch.float32,
+            ),
+            "target_place_win": torch.tensor(
+                np.stack(p_all["target_place_win"].to_list()),
+                dtype=torch.float32,
+            ),
+            "target_hot_piece": torch.tensor(
+                np.stack(p_all["target_hot_piece"].to_list()),
                 dtype=torch.float32,
             ),
         },
@@ -1522,3 +1618,79 @@ def DQN_training_step_decoupled_autoreg(
         state_select_values,
         expected_select,
     )
+
+
+def win_margin_aux_loss(
+    policy_net: NN_abstract,
+    exp_batch: TensorDict,
+    *,
+    lambda_place_win: float = 0.0,
+    lambda_sel_margin: float = 0.0,
+    margin: float = 0.5,
+) -> torch.Tensor:
+    """Auxiliary X-series margin losses (default no-op).
+
+    Computed from frozen 1-ply targets stored in the buffer at state-visit time
+    (``target_place_win`` / ``target_hot_piece`` from
+    :func:`gen_experience_unified_autoreg`). Both terms are pure *ranking*
+    hinges on the policy net's own head outputs — no coupling to the Q value
+    scale:
+
+    - **place-win (X1):** on PLACE rows with >=1 winning cell AND >=1 other
+      legal cell, push ``max Q_place(win) >= max Q_place(other legal) + margin``
+      so the argmax placement is an immediate win.
+    - **select-margin (X3):** on SELECT rows with both safe and hot available
+      pieces, push ``max Q_select(safe) >= max Q_select(hot) + margin`` so the
+      argmax give avoids hot pieces.
+
+    Returns a scalar loss tensor — exactly ``0`` when both lambdas are 0, the
+    targets are absent (non-X buffers), or no qualifying rows exist in the
+    batch. Does its own forward pass so the caller's training-step contract is
+    untouched.
+    """
+    device = next(policy_net.parameters()).device
+    total = torch.zeros((), device=device)
+    if lambda_place_win <= 0.0 and lambda_sel_margin <= 0.0:
+        return total
+    keys = set(exp_batch.keys())
+    if "target_place_win" not in keys or "target_hot_piece" not in keys:
+        return total
+
+    phase = exp_batch["phase"].to(torch.int64)
+    place_mask = phase == PHASE_PLACE
+    select_mask = phase == PHASE_SELECT
+    q_place_all, q_select_all = policy_net(
+        exp_batch["state_board"], exp_batch["state_aux"], phase=phase
+    )
+
+    def _hinge(q: torch.Tensor, good: torch.Tensor, bad: torch.Tensor):
+        """relu(margin - (max_good Q - max_bad Q)), averaged over rows that
+        have at least one element in both the good and bad sets."""
+        rows = (good.sum(1) > 0) & (bad.sum(1) > 0)
+        if not bool(rows.any()):
+            return None
+        qr = q[rows]
+        neg = torch.finfo(qr.dtype).min
+        best_good = torch.where(good[rows] > 0, qr, torch.full_like(qr, neg)).max(1).values
+        best_bad = torch.where(bad[rows] > 0, qr, torch.full_like(qr, neg)).max(1).values
+        return torch.relu(margin - (best_good - best_bad)).mean()
+
+    if lambda_place_win > 0.0 and bool(place_mask.any()):
+        qp = q_place_all[place_mask]
+        win = exp_batch["target_place_win"][place_mask]
+        legal = exp_batch["valid_mask"][place_mask]
+        other = legal * (1.0 - win)  # legal, non-winning cells
+        h = _hinge(qp, win, other)
+        if h is not None:
+            total = total + lambda_place_win * h
+
+    if lambda_sel_margin > 0.0 and bool(select_mask.any()):
+        qs = q_select_all[select_mask]
+        hot = exp_batch["target_hot_piece"][select_mask]
+        avail = exp_batch["valid_mask"][select_mask]
+        safe = avail * (1.0 - hot)  # available, non-hot pieces
+        h = _hinge(qs, safe, hot)
+        if h is not None:
+            total = total + lambda_sel_margin * h
+
+    return total
