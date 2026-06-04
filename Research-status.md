@@ -156,6 +156,28 @@ at least one of D1/D2/D3 returning evidence for an architectural mechanism.
 
 ## Recent results
 
+### Wa_oracleStates + loss autopsy — 2026-06-04
+
+**Wa (N_LAST_STATES sweep, N∈{8,12,16} on the Ve recipe).** Full write-up:
+[`docs/diary/series-W.md`](docs/diary/series-W.md). D1 is an inverted-U in N,
+peaking at **N=8** (best-on-record: safe-piece 0.89 back-half / 0.92 final,
+ρ̄ 0.67) — beating the champion Ve(4) (N=4: 0.846 / 0.610) at WR statistically
+tied (87.0% vs 87.2%). N≥12 is dominated (worse WR *and* worse D1; only "wins"
+on the misleading `loss_select`, which falls with N as the buffer fills with
+easy early-game states — a dilution artefact, not quality). N=8 is a candidate
+**interpretability substrate** (confirmation seed advised); Ve(4) stays WR
+champion by a whisker. N axis exhausted for WR.
+
+**Loss autopsy of Ve(4) vs random** (`analysis/competence_audit/REPORT.md`).
+The argmax policy loses **~4.2%** (the 5.7% in `champion-results.jsonl` was the
+temp=0.1 *sampling* agent). Of those losses, only ~⅓ are avoidable `Q_select`
+blunders (**~1.4%** of games); ~⅔ are **forced** positions the agent walks into
+mid-game (~2.7%). The place head also misses **6.7%** of immediate wins. **No
+first-player effect** (P1/P2 symmetric, |z|<1.6). Consequence: a perfect select
+head caps the WR gain at ~1.4 pp — so the next training direction is **place-side
+win-taking supervision**, then deeper-oracle planning for the forced floor, with
+the `Q_select` margin loss demoted. See forward queue.
+
 ### Ve_oracleAblation(4) — 10k confirmation, 2026-05-24
 
 Same recipe as Ve(1) (Sa(3) + minimax depth=2, oracle always on) at
@@ -296,17 +318,28 @@ Saturation is **not** a head-level pathology. Full write-up in
 
 ## Forward queue
 
-1. **Wa_oracleStates — N_LAST_STATES sweep on the Ve recipe** — Ve
-   recipe + minimax depth=2 oracle + N_LAST_STATES_INIT ∈ {3, 4, 6, 8}
-   at 10k epochs. N directly modulates how many oracle-supervised
-   select transitions per game enter the buffer; never tested under
-   T/V. Hypothesis: larger N raises both D1 recall and WR by giving the
-   oracle more opportunities per game; risk is replay-buffer
-   distribution shift à la Ac_fineShallow. **Pre-T D1 sharpens the
-   prior:** OA(4) N=12 lands at chance on `forcing_loss_bottom_recall`
-   without oracle — N=12 may dilute per-state signal even with oracle.
-   Cap the sweep at N=8 unless the N=6 result clearly trends up.
-2. **Sa(3) 10k confirmation run** — re-run
+**Standing constraint (user, 2026-06-04):** the champion must be a **pure
+learned policy — no inference-time tactical search.** All WR fixes land in the
+weights.
+
+1. **Place-side win-taking supervision (next training series, new code letter)**
+   — the 2026-06-04 loss autopsy (`analysis/competence_audit/REPORT.md`) shows
+   the argmax champion loses ~4.2% to random, of which only ~1.4% (a third) is
+   avoidable `Q_select` blunders — the rest is *forced* positions the agent
+   walks into mid-game (~2.7%) — and the place head misses **6.7%** of immediate
+   wins. So the select-margin idea is demoted; the highest WR-per-effort lever is
+   place-side: mask-supervise `Q_place` toward the winning cell on every PLACE
+   state where one exists (cf. `competence_audit/PLAN.md` → Vf). Cheap, reuses
+   the win-check machinery, and trims forced exposure indirectly.
+2. **Deeper oracle / planning (depth-3)** — the only lever that attacks the
+   dominant ~2.7% *forced* floor (locally unavoidable at the give, but the agent
+   could avoid *reaching* those positions with lookahead). Expensive; now
+   justified by the autopsy as the dominant loss class. Sequence after the
+   place-side series.
+3. **`Q_select` margin/ranking loss** — for the avoidable ~1.4% only. Worth
+   doing for the interpretability substrate (pushes `safe_piece_recall`→1.0 in
+   the weights), but no longer the headline WR fix.
+4. **Sa(3) 10k confirmation run** — re-run
    `Sa_archScan(3)0512_ARCH_S4_uniform512` at 10k epochs to lock the
    interpretability-substrate-of-record claim. **Priority raised** —
    the pre-T D1 scan (forward-queue #3, done 2026-05-24) shows Sa(3)
@@ -314,12 +347,12 @@ Saturation is **not** a head-level pathology. Full write-up in
    reversing the prior series-S verdict that Sa(3) "no Q_select gain".
    Worth confirming the +0.15 recall lead is stable across training
    length before promoting Sa(3) as a *non-oracle* interp substrate.
-3. **D1 on M-series (joint schema)** — requires adapter work in
+5. **D1 on M-series (joint schema)** — requires adapter work in
    `analysis/qselect_diagnostics/_common.py` to support `Quarto_autoreg_bot`
    + the joint-schema `gen_experience` path. Low priority — M is the
    displaced champion, and the OA/Sa scan already locked the headline
    finding that pre-oracle runs sit at 0.35–0.52 safe-piece recall.
-4. **Faithful-path D2 (buffer-dump hook)** — optional config-gated hook in
+6. **Faithful-path D2 (buffer-dump hook)** — optional config-gated hook in
    `trainRL.py` to log the actual replay buffer at fixed checkpoints. The
    2026-05-19 D2 verdict was on the cheap path; faithful path would lock
    the H2-falsified finding for early-training phases too.
