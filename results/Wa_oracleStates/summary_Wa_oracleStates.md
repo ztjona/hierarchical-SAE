@@ -1,19 +1,18 @@
-# Summary — Sa_archScan
+# Summary — Wa_oracleStates
 
-Generated: 2026-05-26 13:22
-Parameter varied: `ARCH`
-Runs: 4 (+ 7 baselines)
+Generated: 2026-06-04 14:22
+Parameter varied: `N_LAST_STATES`
+Runs: 3 (+ 7 baselines)
 
 Final metrics = mean over the last 10% of epochs. `Peak` = max of the smoothed win-rate curve reached at any point during training. `Trend` = OLS slope (pp per 1000 epochs) on the smoothed back half of the WR curve, decimated to the smoothing window for approximate independence; `↑` marks slopes whose 95% CI is strictly positive (i.e. the curve was still climbing at the end of training).
 
 ## Experiment runs
 
-| Run                                   | Param              | Epochs | Final loss | Final vs bot_loss-BT | Peak vs bot_loss-BT | Trend vs bot_loss-BT | Final vs bot_random | Peak vs bot_random | Trend vs bot_random |
-|---------------------------------------|--------------------|--------|------------|----------------------|---------------------|----------------------|---------------------|--------------------|---------------------|
-| Sa_archScan(1)0512_ARCH_S1_deepConv   | ARCH=S1_deepConv   | 5000   | 0.1857     | 44.3%                | 47.8%               | +1.2↑                | 66.9%               | 68.6%              | +0.6↑               |
-| Sa_archScan(2)0512_ARCH_S2_wideFC     | ARCH=S2_wideFC     | 5000   | 0.1831     | 63.7%                | 66.6%               | +4.2↑                | 80.4%               | 81.9%              | +2.3↑               |
-| Sa_archScan(4)0525_ARCH_S4_10k        | ARCH=S4_10k        | 10000  | 0.1557     | 78.9%                | 80.9%               | +0.8↑                | 89.9%               | 91.2%              | +0.4↑               |
-| Sa_archScan(3)0512_ARCH_S4_uniform512 | ARCH=S4_uniform512 | 5000   | 0.1742     | 73.5%                | 75.2%               | +3.4↑                | 86.4%               | 87.5%              | +2.1↑               |
+| Run                                     | Param            | Epochs | Final loss | Final vs bot_loss-BT | Peak vs bot_loss-BT | Trend vs bot_loss-BT | Final vs bot_random | Peak vs bot_random | Trend vs bot_random |
+|-----------------------------------------|------------------|--------|------------|----------------------|---------------------|----------------------|---------------------|--------------------|---------------------|
+| Wa_oracleStates(1)0525_N_LAST_STATES_8  | N_LAST_STATES=8  | 10000  | 0.0356     | 87.0%                | 88.3%               | +0.6↑                | 93.3%               | 94.5%              | +0.4↑               |
+| Wa_oracleStates(2)0525_N_LAST_STATES_12 | N_LAST_STATES=12 | 10000  | 0.0284     | 85.7%                | 87.4%               | +0.5↑                | 92.2%               | 93.4%              | +0.3↑               |
+| Wa_oracleStates(3)0525_N_LAST_STATES_16 | N_LAST_STATES=16 | 10000  | 0.0248     | 85.9%                | 86.9%               | +0.8↑                | 92.5%               | 94.1%              | +0.5↑               |
 
 ## Baselines
 
@@ -29,6 +28,6 @@ Final metrics = mean over the last 10% of epochs. `Peak` = max of the smoothed w
 
 ## Best runs (experiments only)
 
-- Lowest final loss: **Sa_archScan(4)0525_ARCH_S4_10k** — 0.1557
-- Highest final WR vs bot_loss-BT: **Sa_archScan(4)0525_ARCH_S4_10k** — 78.9%
-- Highest final WR vs bot_random: **Sa_archScan(4)0525_ARCH_S4_10k** — 89.9%
+- Lowest final loss: **Wa_oracleStates(3)0525_N_LAST_STATES_16** — 0.0248
+- Highest final WR vs bot_loss-BT: **Wa_oracleStates(1)0525_N_LAST_STATES_8** — 87.0%
+- Highest final WR vs bot_random: **Wa_oracleStates(1)0525_N_LAST_STATES_8** — 93.3%
