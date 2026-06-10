@@ -87,7 +87,8 @@ BASELINEs = [
     # {"LA_mcSelect": [2, 3]},
     {"MA_tempRegresive": [2, 4]},
     {"ME_endgame": [0.5]},
-    {"Ta_minimaxSelect": [2]}  # [2] matches DEPTH_2 → Ta(1)0514, the depth=2 champion candidate
+    {"Ta_minimaxSelect": [2]},  # [2] matches DEPTH_2 → Ta(1)0514, the depth=2 champion candidate
+    {"Wa_oracleStates": [8]}
 ]
 # BASELINEs = []  # Disable baselines
 

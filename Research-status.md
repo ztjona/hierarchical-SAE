@@ -153,8 +153,50 @@ at least one of D1/D2/D3 returning evidence for an architectural mechanism.
 | T | minimax-oracle select target | Sa(3) | done — `series-T.md`; Ta(1) = **WR champion candidate**, but Q_select metric still flat |
 | **U?** | **Q_select diagnostics (not a training series)** | n/a | **done 2026-05-19** — `analysis/qselect_diagnostics/REPORT.md` — H1 supported, H2/H3 falsified |
 | V | minimax-oracle ablation mid-training | Sa(3) + T-recipe | **done 2026-05-24** — `series-V.md`; Ve(4) @10k = **new champion (87.2% WR, D1 best-on-record)** — supersedes ME(2); Ve(1)/(2)/(3) D1 confirmed oracle is persistent driver not warmup |
+| W | N_LAST_STATES sweep on Ve recipe | Sa(3) + T-recipe | done 2026-06-04 — `series-W.md`; D1 inverted-U peaks at N=8 (best D1, WR tied with champion) |
+| X | competence-lever screen (place-win / depth-3 / select-margin) | Sa(3) + T-recipe + aux hinge | **done 2026-06-08** — `series-X.md`; **X(1) PLACE_WIN wins** (loss-rate −1.46pp, no WR/D1 regression) → promote to 10k. Depth-3 dominated; select-margin rejected *at λ=0.5* (loss-scale artifact, corrected 2026-06-09 — retest scale-balanced in Y) |
+| Y | select-pressure into trunk (aux hot-piece BCE head) | `QuartoCNNAutoregUnifiedS4Hot` + T-recipe + X(1) place hinge | **wired 2026-06-09** — `series-Y.md`; Ya_hotHead 4-arm `λ_hot` screen (stage A of the select fix). Gate = punishing autopsy. *Pending launch.* |
 
 ## Recent results
+
+### Xa_levers — competence-lever screen — 2026-06-08 (3 arms @ 6000 epochs)
+
+Loss-autopsy-driven screen of three WR levers on the Ve(4) recipe; full write-up
+[`docs/diary/series-X.md`](docs/diary/series-X.md). Decision gate = `loss_autopsy.py`
+(5000 games vs uniform random, argmax) vs an identically-autopsied `Ve(1)@6k`
+baseline. **Winner: X(1) PLACE_WIN** (auxiliary place-win ranking hinge, λ=0.5).
+It cuts the autopsy loss-rate **5.00→3.54% (−1.46pp)** with **no WR/D1 regression**
+(WR +3.2/+2.7pp vs BT/random; D1 flat), via *both* a direct collapse of the
+missed-immediate-win rate (**9.32→1.33%, −8pp**) and an indirect drop in the
+forced rate (**3.46→2.08%**, shorter games → fewer self-inflicted forced spots).
+At 6k it already edges the `Ve(4)@10k` champion on autopsy loss-rate (3.54 vs 4.36%).
+**X(2) DEPTH_3 rejected** — dominated: loss-rate −0.22pp only, and PLACE_WIN beat
+it on the very forced rate depth-3 was supposed to uniquely own (2.08 vs 2.96%), at
+lower compute. **X(3) SEL_MARGIN rejected *at λ=0.5*** — the hinge corrupted
+the place head (missed-win 9.32→26.97%, WR −4.3/−2.0pp); it pushed D1
+`safe_piece_recall` to **0.857 (best on record)** but the **in-game avoidable rate
+did not move (1.54→1.50%)** — offline recall ≠ fewer real avoidable losses.
+**[Corrected 2026-06-09: X(3)'s place damage is a loss-SCALE artifact — λ=0.5 makes
+the aux ~5–10× the DQN losses, hinge-dominating the (direction-preserving-clipped)
+gradient. "Select-margin is fundamentally bad" is NOT established; the
+scale-balanced retest is Ya_hotHead. See `series-X.md` → correction.]** **Net:
+the reducible-loss framing flips from select-side avoidable ~1.4% to place-side
+(missed wins + forced exposure), all reachable by one cheap place lever.**
+
+**Post-screen probe + eval-suite unification (2026-06-08).** Static `audit.py`
+on X(1) vs Ve(1)@6k: Test A (place) 0.873→**0.975**, Test B (depth-1 select)
+0.798→**0.838** — X(1)'s mechanism cross-validates and even *helps* the select
+head. Key correction: the autopsy `avoidable_rate` (~1.46%) **understates the
+real select-blunder rate ~10×** — Test B shows the agent still gives an
+immediately-losing piece **~16%** of the time; a *random* opponent just rarely
+punishes it. So X(3)'s "didn't transfer" was an artefact (corrupted model + ~77
+noisy events), and the right select gate is **Test B (hot-give rate)**, not the
+diluted in-game rate; the right autopsy fix is a **punishing opponent**, not a
+more-deterministic agent. **Decision: the `competence_audit` suite (autopsy +
+audit Tests A–E) is now the single evaluation suite; D1/D2/D3
+(`qselect_diagnostics`) is legacy** (`d1_*` keys still emitted but secondary).
+Canonical metric definitions:
+[`analysis/competence_audit/METRICS.md`](analysis/competence_audit/METRICS.md).
 
 ### Wa_oracleStates + loss autopsy — 2026-06-04
 
@@ -322,23 +364,57 @@ Saturation is **not** a head-level pathology. Full write-up in
 learned policy — no inference-time tactical search.** All WR fixes land in the
 weights.
 
-1. **Place-side win-taking supervision (next training series, new code letter)**
-   — the 2026-06-04 loss autopsy (`analysis/competence_audit/REPORT.md`) shows
-   the argmax champion loses ~4.2% to random, of which only ~1.4% (a third) is
-   avoidable `Q_select` blunders — the rest is *forced* positions the agent
-   walks into mid-game (~2.7%) — and the place head misses **6.7%** of immediate
-   wins. So the select-margin idea is demoted; the highest WR-per-effort lever is
-   place-side: mask-supervise `Q_place` toward the winning cell on every PLACE
-   state where one exists (cf. `competence_audit/PLAN.md` → Vf). Cheap, reuses
-   the win-check machinery, and trims forced exposure indirectly.
-2. **Deeper oracle / planning (depth-3)** — the only lever that attacks the
-   dominant ~2.7% *forced* floor (locally unavoidable at the give, but the agent
-   could avoid *reaching* those positions with lookahead). Expensive; now
-   justified by the autopsy as the dominant loss class. Sequence after the
-   place-side series.
-3. **`Q_select` margin/ranking loss** — for the avoidable ~1.4% only. Worth
-   doing for the interpretability substrate (pushes `safe_piece_recall`→1.0 in
-   the weights), but no longer the headline WR fix.
+1. **PLACE_WIN @ 10k — champion challenger (next run).** The Xa screen
+   (2026-06-08, `series-X.md`) settled the place-side lever: X(1) PLACE_WIN
+   (λ_place_win=0.5) cut autopsy loss-rate −1.46pp with no WR/D1 regression and
+   already edged `Ve(4)@10k` on loss-rate at only 6k. Promote to a tuned 10k run
+   on the champion recipe; optionally bracket λ∈{0.25,0.5,1.0}. Trends still
+   rising at 6k (+1.7 BT / +0.8 random pp/1000ep). This is the path to dethroning
+   Ve(4).
+2. ~~**Deeper oracle / planning (depth-3)**~~ — **dropped 2026-06-08.** Xa X(2)
+   DEPTH_3 was dominated: −0.22pp loss-rate only, and PLACE_WIN beat it on the
+   very forced rate depth-3 was meant to uniquely own (2.08 vs 2.96%), at lower
+   compute. The forced floor turned out reachable by the cheap place lever
+   (shorter games), so dedicated lookahead is unmotivated for now.
+3. **De-risked `Q_select` ranking/margin loss — now the headline select fix
+   (promoted 2026-06-08).** The punishing-opponent autopsy showed the **select
+   head is the wall** (~12% avoidable / ~22% loss vs a punisher; X(1) ≈ baseline
+   — the place lever doesn't transfer), and `oracle_target_audit.py` showed the
+   minimax target is **already perfect** (100% separation, hot piece at −0.99)
+   while the model inverts the ranking on ~16–20% of decisive states. The
+   `select_capacity_probe.py` follow-up (3 runs, X(1)±seed, Ve(1)) then showed
+   the wall is **REPRESENTATION-limited, not head-capacity-limited**: a fresh head
+   of *any* depth on the frozen trunk beats the deployed head by only ~1pp, and
+   nothing gets held-out blunder below ~16–20% — `fc1` caps it. So re-run X(3)'s
+   hinge **de-risked**: λ_place_win=0.5 (keep the proven place gain) + small
+   λ_sel_margin (~0.05–0.1) **flowing THROUGH the trunk** (NOT detached — the
+   bottleneck is the representation, so the gradient must reshape `fc1`; balance
+   λ so it doesn't corrupt place — the X(3) failure was λ=0.5). **Gate on the
+   punishing-opponent autopsy** (avoidable rate down, missed-win ~1.3% intact),
+   not WR-vs-random.
+   Leading mechanism candidate: an **auxiliary hot-piece head** (`BCEWithLogits`
+   on the depth-1 hot mask, à la the QC-series legality head) — a dense,
+   well-posed signal that forces the trunk to encode safety; the small-λ
+   margin-through-trunk hinge is the alternative. Run both as a screen.
+   - *Evidence basis (2026-06-08, `series-X.md`):* `select_safety_learnability.py`
+     showed reshaping the SAME trunk select-only cuts held-out blunder
+     **16.7%→6.6%** (>10pp headroom), so the trunk has the capacity and the lever
+     is select pressure *into* the trunk.
+   - *Demoted/ruled out:* (a) punishing-opponent **rollouts** (select is pure
+     oracle-supervision; target already correct); (b) a **deeper select head**
+     (capacity probe: ~1pp on the frozen trunk); (c) **growing the trunk**
+     (learnability probe: capacity already sufficient — it's allocation, not size).
+   - *Scope limit:* the select lever attacks only the **avoidable** half of the
+     punishing loss. X(1) vs punishing = avoidable 12.4% + **forced 10.1%**; a
+     better give can't touch forced positions. Best case ≈ ~22%→~10% (the forced
+     floor), not zero. The 6.6% `champion_init` is select-only / not deployable /
+     a static optimistic reference — measure the real combine vs punishing.
+8. **Forced-exposure / planning lever (the wall after select).** Once the
+   avoidable half is cut, the **forced ~10% vs punishing** dominates — reaching
+   zugzwang where every give is hot. Needs mid-game planning (don't walk into
+   forced positions), the real content of the demoted depth-3 idea — now
+   re-motivated by the punishing metric (it was dropped only because it didn't
+   help vs *random*). Sequence after the select lever lands.
 4. **Sa(3) 10k confirmation run** — re-run
    `Sa_archScan(3)0512_ARCH_S4_uniform512` at 10k epochs to lock the
    interpretability-substrate-of-record claim. **Priority raised** —
@@ -356,6 +432,12 @@ weights.
    `trainRL.py` to log the actual replay buffer at fixed checkpoints. The
    2026-05-19 D2 verdict was on the cheap path; faithful path would lock
    the H2-falsified finding for early-training phases too.
+7. **Eval-suite build-out (`competence_audit/METRICS.md`).** Punishing-opponent
+   autopsy = **done** (2026-06-08, `--opponent punishing`). Still to wire:
+   (a) fold the `audit.py` Test-B hot-give rate into the inline per-checkpoint
+   JSONL as the primary select gate (replacing `d1_safe_piece_recall` in that
+   role; forward-only); (b) a tail/worst-case select stat, not just the Test-B
+   mean; (c) reached-state conditioning for the static probes.
 
 **Dropped 2026-05-24 (after Ve(4) + D1 ship):**
 
