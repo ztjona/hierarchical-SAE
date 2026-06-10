@@ -15,9 +15,11 @@ only win by *placing a piece the agent handed it* into a completing line.
 So every loss decomposes at the agent's final give into exactly one of:
 
 * **avoidable** — the given piece had an immediate winning placement *while a
-  safe (non-completing) piece was still available in storage*. A pure
-  ``Q_select`` blunder; the residual ``1 − safe_piece_recall``. Fixable in the
-  weights.
+  safe (non-completing) piece was still available in storage*. A ``Q_select``
+  blunder that the opponent *converted*. NB: ``avoidable_rate`` is **not**
+  ``1 − safe_piece_recall`` — a random opponent rarely punishes a hot give, so
+  this rate is ~10x diluted below the true depth-1 blunder rate (Test B
+  hot-give rate). See ``METRICS.md`` -> autopsy caveat. Fixable in the weights.
 * **forced**   — *every* available piece completes some line. The agent was
   already lost; random punished it probabilistically. The irreducible floor.
 
@@ -41,7 +43,7 @@ Usage
         --exp 'Ve_oracleAblation(4)0522_DISABLE_NEVER_10k' \\
         [--epoch N] \\
         [--n-games 1000]          # per direction (agent as P1, then as P2)
-        [--opponent uniform|benchmark]
+        [--opponent uniform|punishing|benchmark]   # punishing = un-diluted avoidable_rate
         [--stochastic --temperature 0.1]   # default: deterministic argmax
         [--seed 1234]
 """
@@ -274,9 +276,47 @@ def _merge(a: dict, b: dict) -> dict:
 # ──────────────────────────────────────────────────────────────────────
 
 
+class _PunishingBot(BotAI):
+    """Uniform-random in every respect *except* it never misses an immediate win.
+
+    On placement it takes a winning cell for the held piece if one exists, else
+    plays uniformly at random; selection is uniform random. This isolates the
+    agent's true hot-give rate by removing the dilution a plain random opponent
+    introduces (it usually places a handed winning piece in the *wrong* cell and
+    fails to punish). The fatal-give invariant is preserved — this bot can still
+    only win with a piece the agent handed it, so ``classify_give`` stays valid.
+    See ``METRICS.md`` -> autopsy caveat.
+    """
+
+    def __init__(self):
+        pass
+
+    @property
+    def name(self) -> str:
+        return "punishing_bot"
+
+    def select(self, game: QuartoGame, ith_option: int = 0, *args, **kwargs) -> Piece:
+        valid_moves = game.storage_board.get_valid_moves()
+        assert valid_moves, "No valid moves available in storage."
+        r, c = random.choice(valid_moves)
+        return game.storage_board.get_piece(r, c)
+
+    def place_piece(
+        self, game: QuartoGame, piece: Piece, ith_option: int = 0, *args, **kwargs
+    ) -> tuple[int, int]:
+        valid_moves = game.game_board.get_valid_moves()
+        assert valid_moves, "No valid moves available on the game board."
+        for (r, c) in valid_moves:
+            if _placing_wins(game.game_board, piece, r, c):
+                return (r, c)
+        return random.choice(valid_moves)
+
+
 def _build_opponent(kind: str) -> tuple[BotAI, str]:
     if kind == "uniform":
         return RandomBot(), "random_uniform"
+    if kind == "punishing":
+        return _PunishingBot(), "random_punishing"
     if kind == "benchmark":
         # Reuse the exact "Random Baseline" the champion benchmark uses
         # (epoch-0 CNN, sampled) so the loss rate is comparable to
@@ -454,8 +494,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--epoch", type=int, default=None, help="Epoch to load (default: latest)")
     p.add_argument("--n-games", type=int, default=1000,
                    help="Games per direction (agent as P1, then as P2)")
-    p.add_argument("--opponent", choices=["uniform", "benchmark"], default="uniform",
-                   help="uniform = bot/random_bot; benchmark = champion_config 'random' epoch-0 CNN")
+    p.add_argument("--opponent", choices=["uniform", "punishing", "benchmark"], default="punishing",
+                   help="DEFAULT punishing = uniform but always takes an immediate win "
+                        "(un-diluted avoidable_rate; the champion gate since 2026-06-08); "
+                        "uniform = bot/random_bot (diluted, kept for comparability/WR-vs-random); "
+                        "benchmark = champion_config 'random' epoch-0 CNN")
     p.add_argument("--stochastic", action="store_true",
                    help="Sample the agent's actions (default: deterministic argmax)")
     p.add_argument("--temperature", type=float, default=0.1,

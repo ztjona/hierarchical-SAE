@@ -34,6 +34,7 @@ from models.CNN_autoreg_sa import (  # noqa: E402
     QuartoCNNAutoregUnifiedS1,
     QuartoCNNAutoregUnifiedS2,
     QuartoCNNAutoregUnifiedS4,
+    QuartoCNNAutoregUnifiedS4Hot,
 )
 from QuartoRL.RL_functions import (  # noqa: E402
     PHASE_PLACE,
@@ -75,6 +76,7 @@ _ARCHITECTURE_REGISTRY: dict[str, type] = {
     "QuartoCNNAutoregUnifiedS1": QuartoCNNAutoregUnifiedS1,
     "QuartoCNNAutoregUnifiedS2": QuartoCNNAutoregUnifiedS2,
     "QuartoCNNAutoregUnifiedS4": QuartoCNNAutoregUnifiedS4,
+    "QuartoCNNAutoregUnifiedS4Hot": QuartoCNNAutoregUnifiedS4Hot,
 }
 
 
