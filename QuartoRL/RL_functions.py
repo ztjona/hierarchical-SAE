@@ -1694,3 +1694,45 @@ def win_margin_aux_loss(
             total = total + lambda_sel_margin * h
 
     return total
+
+
+def hot_head_aux_loss(
+    policy_net: NN_abstract,
+    exp_batch: TensorDict,
+    *,
+    lambda_hot: float = 0.0,
+) -> torch.Tensor:
+    """Auxiliary depth-1 hot-piece BCE on the model's ``fc_hot`` head (default no-op).
+
+    Forces the *shared trunk* to encode piece-safety (the select wall is
+    allocation, not capacity — see ``docs/diary/series-X.md``): a dense per-piece
+    ``BCEWithLogits`` between ``policy_net.hot_logits(state_board, state_aux)`` and
+    the frozen ``target_hot_piece`` mask (1 = giving this piece loses to an
+    immediate completion), restricted to SELECT rows and legal (available)
+    pieces. The aux head is a training-time scaffold — not consulted at
+    inference. Returns exactly ``0`` when off, when the model has no hot head,
+    when the target is absent (non-X buffer), or when the batch has no SELECT
+    rows. Does its own forward, matching :func:`win_margin_aux_loss`.
+    """
+    device = next(policy_net.parameters()).device
+    total = torch.zeros((), device=device)
+    if lambda_hot <= 0.0 or not hasattr(policy_net, "hot_logits"):
+        return total
+    if "target_hot_piece" not in set(exp_batch.keys()):
+        return total
+
+    phase = exp_batch["phase"].to(torch.int64)
+    select_mask = phase == PHASE_SELECT
+    if not bool(select_mask.any()):
+        return total
+
+    sb = exp_batch["state_board"][select_mask]
+    sa = exp_batch["state_aux"][select_mask]
+    hot = exp_batch["target_hot_piece"][select_mask].to(device).float()
+    legal = exp_batch["valid_mask"][select_mask].to(device).float()
+
+    logits = policy_net.hot_logits(sb, sa)
+    bce = torch.nn.functional.binary_cross_entropy_with_logits(
+        logits, hot, reduction="none"
+    )
+    return lambda_hot * (bce * legal).sum() / legal.sum().clamp_min(1.0)

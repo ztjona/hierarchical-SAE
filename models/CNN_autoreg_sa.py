@@ -185,3 +185,37 @@ class QuartoCNNAutoregUnifiedS4(_QuartoCNNAutoregUnifiedBase):
 
     def _apply_output_activation(self, logits: torch.Tensor) -> torch.Tensor:
         return torch.tanh(logits)
+
+
+# ---------------------------------------------------------------------------
+# S4Hot: S4 trunk + auxiliary depth-1 hot-piece head (select-safety shaping)
+# ---------------------------------------------------------------------------
+
+
+class QuartoCNNAutoregUnifiedS4Hot(QuartoCNNAutoregUnifiedS4):
+    """S4 + an auxiliary ``fc_hot`` head predicting the depth-1 hot-piece mask
+    (1 = giving this piece loses to an immediate completion).
+
+    Purpose: a dense BCE signal that forces the *shared trunk* to encode
+    piece-safety, which the unchanged ``fc2_select`` head then reads (the wall
+    is allocation, not capacity — see ``docs/diary/series-X.md``). ``forward`` is
+    unchanged and still returns ``(q_place, q_select)``, so every existing
+    bot/diagnostic works as-is; the aux head is a **training-time scaffold**,
+    exposed via :meth:`hot_logits` (own trunk forward, à la the QC
+    ``legality_logits`` pattern) and **not** consulted at inference. Stage-2
+    wiring (feeding ``σ(hot_logits)`` into ``q_select``) is intentionally not
+    done here.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.fc_hot = nn.Linear(self.fc1.out_features, 16)
+
+    @property
+    def name(self) -> str:
+        return "QuartoCNN_autoreg_unified_S4_hot"
+
+    def hot_logits(self, x_board, x_aux) -> torch.Tensor:
+        """Raw logits (B, 16) for the depth-1 hot-piece mask (BCE target side)."""
+        x = self._shared_trunk(x_board, x_aux)
+        return self.fc_hot(x)

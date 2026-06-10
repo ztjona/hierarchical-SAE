@@ -110,50 +110,65 @@ MULTI_PARAMS = None
 # game helps or dilutes. Pre-T D1 showed OA(4) N=12 at chance without oracle;
 # with oracle the picture may differ. [DONE 2026-06-04 — series-W.md]
 #
-# Xa_levers — 3-arm overnight competence-lever screen. Base = Ve(4) champion
-# recipe (QuartoCNNAutoregUnifiedS4, N_LAST_STATES_INIT=4, depth-2 minimax
-# oracle always on) at 6000 epochs (matches the Ve(1)@6k baseline). Each arm
-# changes EXACTLY ONE thing; attribution is each arm's delta vs Ve(1)@6k.
-# Motivated by the 2026-06-04 loss autopsy (analysis/competence_audit/REPORT.md):
-# ~⅔ of vs-random losses are forced positions, ~⅓ avoidable select blunders,
-# and the place head misses 6.7% of immediate wins. λ/margin are screen
-# defaults (0.5/0.5) — tune on the winning lever's deep run. See series-X.md.
-#   X(1) PLACE_WIN  : aux place-win hinge (LAMBDA_PLACE_WIN), depth 2.
-#   X(2) DEPTH_3    : deeper select oracle (MINIMAX_SELECT_DEPTH=3), no aux.
-#   X(3) SEL_MARGIN : aux select-margin hinge (LAMBDA_SEL_MARGIN), depth 2.
+# Xa_levers — 3-arm competence-lever screen [DONE 2026-06-08 — series-X.md].
+# X(1) PLACE_WIN won; X(2) DEPTH_3 dominated; X(3) SEL_MARGIN rejected at λ=0.5
+# (loss-scale artifact). Block removed; recoverable from git.
+#
+# Ya_hotHead — 4-arm λ_hot screen. Base = X(1) PLACE_WIN recipe
+# (QuartoCNNAutoregUnifiedS4Hot, depth-2 minimax oracle always on,
+# N_LAST_STATES_INIT=4, LAMBDA_PLACE_WIN=0.5) at 6000 epochs. Stage A of the
+# select-pressure plan: a dense aux hot-piece BCE head (LAMBDA_HOT) forces the
+# shared trunk to encode piece-safety — the select wall is allocation, not
+# capacity (series-X.md → safety learnability). Sweep λ_hot only; each arm
+# self-reports its loss balance via loss_data["loss_hot_values"] (weighted
+# λ·BCE) vs loss_select_values, and grad_norm/clip-rate flags any aux-dominated
+# arm post-hoc (raw BCE ≈ 0.7 vs L_select ≈ 0.05–0.1, so balance ~ λ_hot ∈
+# [0.1,0.3]; the log sweep brackets it). Gate: punishing-opponent autopsy
+# (avoidable ↓, missed-win ~1.3% intact) + Test-B + inline D1/WR.
 MULTI_PARAMS = [
     {
-        "ARCHITECTURE": "QuartoCNNAutoregUnifiedS4",
+        "ARCHITECTURE": "QuartoCNNAutoregUnifiedS4Hot",
         "USE_MINIMAX_SELECT_TARGET": True,
         "MINIMAX_SELECT_DEPTH": 2,
         "MINIMAX_DISABLE_AFTER_EPOCH": None,
         "N_LAST_STATES_INIT": 4,
         "EPOCHS": "6_000",
         "LAMBDA_PLACE_WIN": 0.5,
-        "LAMBDA_SEL_MARGIN": 0.0,
-        "_label": "PLACE_WIN",
+        "LAMBDA_HOT": 0.03,
+        "_label": "HOT_0.03",
     },
     {
-        "ARCHITECTURE": "QuartoCNNAutoregUnifiedS4",
-        "USE_MINIMAX_SELECT_TARGET": True,
-        "MINIMAX_SELECT_DEPTH": 3,
-        "MINIMAX_DISABLE_AFTER_EPOCH": None,
-        "N_LAST_STATES_INIT": 4,
-        "EPOCHS": "6_000",
-        "LAMBDA_PLACE_WIN": 0.0,
-        "LAMBDA_SEL_MARGIN": 0.0,
-        "_label": "DEPTH_3",
-    },
-    {
-        "ARCHITECTURE": "QuartoCNNAutoregUnifiedS4",
+        "ARCHITECTURE": "QuartoCNNAutoregUnifiedS4Hot",
         "USE_MINIMAX_SELECT_TARGET": True,
         "MINIMAX_SELECT_DEPTH": 2,
         "MINIMAX_DISABLE_AFTER_EPOCH": None,
         "N_LAST_STATES_INIT": 4,
         "EPOCHS": "6_000",
-        "LAMBDA_PLACE_WIN": 0.0,
-        "LAMBDA_SEL_MARGIN": 0.5,
-        "_label": "SEL_MARGIN",
+        "LAMBDA_PLACE_WIN": 0.5,
+        "LAMBDA_HOT": 0.1,
+        "_label": "HOT_0.1",
+    },
+    {
+        "ARCHITECTURE": "QuartoCNNAutoregUnifiedS4Hot",
+        "USE_MINIMAX_SELECT_TARGET": True,
+        "MINIMAX_SELECT_DEPTH": 2,
+        "MINIMAX_DISABLE_AFTER_EPOCH": None,
+        "N_LAST_STATES_INIT": 4,
+        "EPOCHS": "6_000",
+        "LAMBDA_PLACE_WIN": 0.5,
+        "LAMBDA_HOT": 0.3,
+        "_label": "HOT_0.3",
+    },
+    {
+        "ARCHITECTURE": "QuartoCNNAutoregUnifiedS4Hot",
+        "USE_MINIMAX_SELECT_TARGET": True,
+        "MINIMAX_SELECT_DEPTH": 2,
+        "MINIMAX_DISABLE_AFTER_EPOCH": None,
+        "N_LAST_STATES_INIT": 4,
+        "EPOCHS": "6_000",
+        "LAMBDA_PLACE_WIN": 0.5,
+        "LAMBDA_HOT": 1.0,
+        "_label": "HOT_1.0",
     },
 ]
 

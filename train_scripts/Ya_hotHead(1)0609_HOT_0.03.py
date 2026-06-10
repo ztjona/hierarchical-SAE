@@ -57,7 +57,7 @@ logger.info("Imports done.")
 
 # STARTING_NET = "CHECKPOINTS\\Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8\\20260227_1103-Aa_replay(2)0226_NUM_EPOCHs_BUFFER_8_E_5000.pt"
 STARTING_NET = None  # Set to None to start with random weights
-EXPERIMENT_NAME = "OA_unifiedAux"
+EXPERIMENT_NAME = "Ya_hotHead(1)0609_HOT_0.03"
 CHECKPOINT_FOLDER = f"./CHECKPOINTS/{EXPERIMENT_NAME}/"
 # Series root = the experiment family (everything before the "(idx)MMDD_..." tag
 # appended by run_trains.py). JSONL summaries live alongside per-series notes
@@ -70,7 +70,7 @@ RESULTS_FOLDER = f"./results/{SERIES_ROOT}/"
 #   "decoupled_autoreg" → QuartoCNNAutoreg / QuartoCNNAutoregUnbound           +  Quarto_autoreg_bot
 #   "unified_autoreg"   → QuartoCNNAutoregUnified / QuartoCNNAutoregUnifiedUnbound + Quarto_unified_bot
 TRANSITION_SCHEMA = "unified_autoreg"
-ARCHITECTURE = QuartoCNNAutoregUnified
+ARCHITECTURE = QuartoCNNAutoregUnifiedS4Hot
 PLAYER_BOT_CLASS = Quarto_unified_bot
 # ARCHITECTURE = QuartoCNNAutoreg                  # ← use with decoupled_autoreg
 # PLAYER_BOT_CLASS = Quarto_autoreg_bot             # ← use with decoupled_autoreg
@@ -97,8 +97,8 @@ DECOUPLED_TARGET_STYLE = "td_place_mc_select"  # Options: "td_place_mc_select", 
 #
 # When True, this overrides DECOUPLED_TARGET_STYLE to "td_place_minimax_select"
 # at the bottom of this block.
-USE_MINIMAX_SELECT_TARGET = False
-MINIMAX_SELECT_DEPTH = 2  # Used only when USE_MINIMAX_SELECT_TARGET is True.
+USE_MINIMAX_SELECT_TARGET = True
+MINIMAX_SELECT_DEPTH = 2
 
 # ---- Ve-series knob: oracle ablation ----
 # When set to a positive integer K, the SELECT_ORACLE is disabled (set to None)
@@ -162,10 +162,10 @@ BATCH_SIZE = 32
 mode_2x2 = True
 
 # every epoch experience is generated with a new bot instance, models are saved at the end of each epoch
-EPOCHS = 5_000
+EPOCHS = 6_000
 
 # number of last states to consider in the experience generation at the beginning of training
-N_LAST_STATES_INIT = 4  # Constant N (no curriculum). N=4 supplies winner-select samples (see series-M.md).
+N_LAST_STATES_INIT = 4
 # number of last states to consider in the experience generation at the end of training. -1 means all states
 N_LAST_STATES_FINAL = N_LAST_STATES_INIT  # No curriculum, constant
 
@@ -248,9 +248,9 @@ LOSS_ALPHA_SELECT = 1.0
 #   X(3) sel-margin: argmax Q_select should avoid hot pieces (safe ranks above
 #                    hot by >= WIN_MARGIN).
 # (X(2) deeper oracle is just MINIMAX_SELECT_DEPTH=3 — no flag here.)
-LAMBDA_PLACE_WIN = 0.0   # weight on the place-win hinge (X1). 0 = off.
+LAMBDA_PLACE_WIN = 0.5
 LAMBDA_SEL_MARGIN = 0.0  # weight on the select-margin hinge (X3). 0 = off.
-LAMBDA_HOT = 0.0         # weight on the aux hot-piece BCE head (stage A). 0 = off.
+LAMBDA_HOT = 0.03
                          # Requires a model with a hot head (QuartoCNNAutoregUnifiedS4Hot).
 WIN_MARGIN = 0.5         # hinge margin (Q-units) for both terms.
 # Only compute the (costly) 1-ply masks in gen_experience when the matching

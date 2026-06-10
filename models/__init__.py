@@ -13,6 +13,7 @@ from .CNN_autoreg_sa import (
     QuartoCNNAutoregUnifiedS1,
     QuartoCNNAutoregUnifiedS2,
     QuartoCNNAutoregUnifiedS4,
+    QuartoCNNAutoregUnifiedS4Hot,
 )
 
 # from .CNN1 import QuartoCNN
