@@ -155,9 +155,38 @@ at least one of D1/D2/D3 returning evidence for an architectural mechanism.
 | V | minimax-oracle ablation mid-training | Sa(3) + T-recipe | **done 2026-05-24** — `series-V.md`; Ve(4) @10k = **new champion (87.2% WR, D1 best-on-record)** — supersedes ME(2); Ve(1)/(2)/(3) D1 confirmed oracle is persistent driver not warmup |
 | W | N_LAST_STATES sweep on Ve recipe | Sa(3) + T-recipe | done 2026-06-04 — `series-W.md`; D1 inverted-U peaks at N=8 (best D1, WR tied with champion) |
 | X | competence-lever screen (place-win / depth-3 / select-margin) | Sa(3) + T-recipe + aux hinge | **done 2026-06-08** — `series-X.md`; **X(1) PLACE_WIN wins** (loss-rate −1.46pp, no WR/D1 regression) → promote to 10k. Depth-3 dominated; select-margin rejected *at λ=0.5* (loss-scale artifact, corrected 2026-06-09 — retest scale-balanced in Y) |
-| Y | select-pressure into trunk (aux hot-piece BCE head) | `QuartoCNNAutoregUnifiedS4Hot` + T-recipe + X(1) place hinge | **wired 2026-06-09** — `series-Y.md`; Ya_hotHead 4-arm `λ_hot` screen (stage A of the select fix). Gate = punishing autopsy. *Pending launch.* |
+| Y | select-pressure into trunk (aux hot-piece BCE head) | `QuartoCNNAutoregUnifiedS4Hot` + T-recipe + X(1) place hinge | **done 2026-06-12** — `series-Y.md`; **gate PASS — the select wall breaks.** Ya 4-arm `λ_hot` screen: punishing **avoidable 12%→1.64%** (λ=1.0), Test-B hot-give **16%→4.5%**, place intact. Promote λ∈{0.3,1.0} to 10k. Stage B (wire `σ(hot)` into q_select) unmotivated; margin-hinge alternative dropped. |
 
 ## Recent results
+
+### Ya_hotHead — select-pressure into the trunk — 2026-06-12 (4 arms @ 6000 epochs) — **THE SELECT WALL BREAKS**
+
+4-arm `λ_hot ∈ {0.03, 0.1, 0.3, 1.0}` screen of an auxiliary hot-piece BCE head
+(`QuartoCNNAutoregUnifiedS4Hot`) on the X(1) recipe; full write-up
+[`docs/diary/series-Y.md`](docs/diary/series-Y.md). Gate = punishing-opponent
+autopsy (`loss_autopsy.py`, 10k games/arm) + Test-B hot-give (`audit.py`).
+**Gate PASS, monotonic in λ.** The dense BCE head reshapes the **trunk** (gradient
+through it, not detached) so the unchanged `fc2_select` reads safety:
+
+| arm | punish **avoidable** | Test-B hot-give | missed-win (place) | Test-A place | WR vs BT | D1 safe-recall |
+|---|---|---|---|---|---|---|
+| X(1) baseline | 12.36% | 16.2% | 1.40% | 97.5% | — | 0.857 |
+| Ya λ=0.3 | **3.36%** | **6.1%** | 1.27% | 96.5% | 93.3% | 0.947 |
+| Ya λ=1.0 | **1.64%** | **4.5%** | 1.76% | 95.6% | 94.4% | 0.958 |
+
+The Q_select competence wall (open since the M-series; "saturation" was the metric
+artefact, but the **in-play avoidable-blunder** wall was real) is resolved — it was
+**trunk allocation**, exactly as the `series-X` `select_safety_learnability` probe
+predicted. **No place corruption** (opposite of X(3)): missed-win ≈1.3–1.8%, a mild
+Test-A tax only at λ=1.0. The BCE head is **dense + well-posed**, so even at pre-clip
+grad norm ~3× the clip (λ=1.0) the direction helps both heads — clean confirmation
+that **clip-rate alone ≠ reject** ([[aux-loss-scale-vs-grad-clip]]). **Bonus:** the
+forced floor also fell (forced losses −17% absolute, 11.1%→8.7%) — the hot trunk
+steers placement off zugzwang too. Forced is now **84% of the residual loss** at
+λ=1.0 → the planning lever is the next frontier. **Stage B (wire `σ(hot_logits)`
+into `q_select`) is unmotivated** — `q_select` already uses the enriched trunk; the
+margin-hinge alternative is dropped. **Next: promote λ∈{0.3,1.0} to a tuned 10k run**
+(confirm the λ=1.0 place tax doesn't compound over 10k before crowning).
 
 ### Xa_levers — competence-lever screen — 2026-06-08 (3 arms @ 6000 epochs)
 
@@ -364,19 +393,30 @@ Saturation is **not** a head-level pathology. Full write-up in
 learned policy — no inference-time tactical search.** All WR fixes land in the
 weights.
 
-1. **PLACE_WIN @ 10k — champion challenger (next run).** The Xa screen
-   (2026-06-08, `series-X.md`) settled the place-side lever: X(1) PLACE_WIN
-   (λ_place_win=0.5) cut autopsy loss-rate −1.46pp with no WR/D1 regression and
-   already edged `Ve(4)@10k` on loss-rate at only 6k. Promote to a tuned 10k run
-   on the champion recipe; optionally bracket λ∈{0.25,0.5,1.0}. Trends still
-   rising at 6k (+1.7 BT / +0.8 random pp/1000ep). This is the path to dethroning
-   Ve(4).
+1. **`S4Hot` λ_hot 10k — champion challenger (next run).** Ya_hotHead
+   (2026-06-12, `series-Y.md`) broke the select wall on the X(1) recipe (which
+   already carries the PLACE_WIN place hinge): punishing avoidable **12%→1.64%**,
+   Test-B hot-give **16%→4.5%**, place intact, **WR 94.4% BT / 97.0% random at 6k
+   — already past `Ve(4)@10k` (87.2%/93.8%)**, still rising. Promote a tuned **10k**
+   run, **bracketing λ_hot∈{0.3, 1.0}** (λ=0.3 = cleanest place preservation;
+   λ=1.0 = best gate+WR at a marginal place tax that must be re-checked at 10k).
+   This is now the path to dethroning Ve(4) — supersedes the bare "PLACE_WIN @ 10k"
+   item (the place hinge is folded into the Ya recipe).
 2. ~~**Deeper oracle / planning (depth-3)**~~ — **dropped 2026-06-08.** Xa X(2)
    DEPTH_3 was dominated: −0.22pp loss-rate only, and PLACE_WIN beat it on the
    very forced rate depth-3 was meant to uniquely own (2.08 vs 2.96%), at lower
    compute. The forced floor turned out reachable by the cheap place lever
    (shorter games), so dedicated lookahead is unmotivated for now.
-3. **De-risked `Q_select` ranking/margin loss — now the headline select fix
+3. **[DONE 2026-06-12 — select wall broken by Ya_hotHead.]** The aux **hot-piece
+   BCE head** (the leading candidate below) landed the fix: punishing avoidable
+   **12%→1.64%**, Test-B hot-give **16%→4.5%**, monotonic in λ_hot, place intact —
+   confirming the wall was **trunk allocation** (the `select_safety_learnability`
+   prediction). The margin-through-trunk hinge alternative is **dropped** (BCE won
+   outright); **stage B** (wire `σ(hot_logits)` into `q_select`) is **unmotivated**
+   (`q_select` already reads the enriched trunk). Remaining residual is dominated
+   by the **forced floor** (84% of losses at λ=1.0) → item #8. Original framing
+   preserved below for provenance.
+   **De-risked `Q_select` ranking/margin loss — was the headline select fix
    (promoted 2026-06-08).** The punishing-opponent autopsy showed the **select
    head is the wall** (~12% avoidable / ~22% loss vs a punisher; X(1) ≈ baseline
    — the place lever doesn't transfer), and `oracle_target_audit.py` showed the
@@ -409,12 +449,13 @@ weights.
      better give can't touch forced positions. Best case ≈ ~22%→~10% (the forced
      floor), not zero. The 6.6% `champion_init` is select-only / not deployable /
      a static optimistic reference — measure the real combine vs punishing.
-8. **Forced-exposure / planning lever (the wall after select).** Once the
-   avoidable half is cut, the **forced ~10% vs punishing** dominates — reaching
-   zugzwang where every give is hot. Needs mid-game planning (don't walk into
-   forced positions), the real content of the demoted depth-3 idea — now
-   re-motivated by the punishing metric (it was dropped only because it didn't
-   help vs *random*). Sequence after the select lever lands.
+8. **Forced-exposure / planning lever — NOW THE WALL (select lever landed).**
+   Ya cut the avoidable half to 1.64%, so the **forced ~8.7% vs punishing now
+   dominates — 84% of the residual loss** at λ=1.0 (and Ya already nudged it
+   −17% absolute as a side-effect of the hot trunk). Reaching zugzwang where every
+   give is hot needs mid-game planning (don't walk into forced positions) — the
+   real content of the demoted depth-3 idea, re-motivated by the punishing metric.
+   **This is the next frontier after the Ya 10k promotion.**
 4. **Sa(3) 10k confirmation run** — re-run
    `Sa_archScan(3)0512_ARCH_S4_uniform512` at 10k epochs to lock the
    interpretability-substrate-of-record claim. **Priority raised** —

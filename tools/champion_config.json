@@ -1,14 +1,21 @@
 {
-    "champion": "Ve_oracleAblation_4",
+    "champion": "Ya_hotHead_4",
     "default_opponents": [
         "random",
         "loss_BT",
         "Aa_replay",
         "ME_endgame",
         "Sa_archScan_3",
-        "Ta_minimaxSelect_1"
+        "Ta_minimaxSelect_1",
+        "Ve_oracleAblation_4"
     ],
     "bots": {
+        "Ya_hotHead_4": {
+            "path": "CHECKPOINTS/Ya_hotHead(4)0610_HOT_1.0/20260611_1950-Ya_hotHead(4)0610_HOT_1.0_E_6000.pt",
+            "model_class": "QuartoCNNAutoregUnifiedS4Hot",
+            "bot_class": "Quarto_unified_bot",
+            "name": "Ya_hotHead(4) [hot lambda=1.0, E=6000]"
+        },
         "Ve_oracleAblation_4": {
             "path": "CHECKPOINTS/Ve_oracleAblation(4)0522_DISABLE_NEVER_10k/20260524_1904-Ve_oracleAblation(4)0522_DISABLE_NEVER_10k_E_10000.pt",
             "model_class": "QuartoCNNAutoregUnifiedS4",

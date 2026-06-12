@@ -34,15 +34,19 @@ from bot.CNN_autoreg_bot import Quarto_bot as Quarto_autoreg_bot
 from models.CNN1 import QuartoCNN
 from models.CNN_uncoupled import QuartoCNN as QuartoCNN_uncoupled
 from models.CNN_autoreg import QuartoCNNAutoreg
-from models.CNN_autoreg_sa import QuartoCNNAutoregUnifiedS4
+from models.CNN_autoreg_sa import QuartoCNNAutoregUnifiedS4, QuartoCNNAutoregUnifiedS4Hot
 
 # Registry mapping string names used in champion_config.json to actual classes.
 # Add a new entry here whenever a new model or bot class is introduced.
+# NB QuartoCNNAutoregUnifiedS4Hot's fc_hot head is a training-time scaffold:
+# forward() is unchanged (returns q_place, q_select), so it plays through
+# Quarto_unified_bot exactly like S4 — the hot params just sit unused at inference.
 _MODEL_REGISTRY = {
     "QuartoCNN": QuartoCNN,
     "QuartoCNN_uncoupled": QuartoCNN_uncoupled,
     "QuartoCNNAutoreg": QuartoCNNAutoreg,
     "QuartoCNNAutoregUnifiedS4": QuartoCNNAutoregUnifiedS4,
+    "QuartoCNNAutoregUnifiedS4Hot": QuartoCNNAutoregUnifiedS4Hot,
 }
 
 _BOT_REGISTRY = {
