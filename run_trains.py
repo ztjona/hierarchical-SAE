@@ -114,62 +114,38 @@ MULTI_PARAMS = None
 # X(1) PLACE_WIN won; X(2) DEPTH_3 dominated; X(3) SEL_MARGIN rejected at λ=0.5
 # (loss-scale artifact). Block removed; recoverable from git.
 #
-# Ya_hotHead — 4-arm λ_hot screen. Base = X(1) PLACE_WIN recipe
-# (QuartoCNNAutoregUnifiedS4Hot, depth-2 minimax oracle always on,
-# N_LAST_STATES_INIT=4, LAMBDA_PLACE_WIN=0.5) at 6000 epochs. Stage A of the
-# select-pressure plan: a dense aux hot-piece BCE head (LAMBDA_HOT) forces the
-# shared trunk to encode piece-safety — the select wall is allocation, not
-# capacity (series-X.md → safety learnability). Sweep λ_hot only; each arm
-# self-reports its loss balance via loss_data["loss_hot_values"] (weighted
-# λ·BCE) vs loss_select_values, and grad_norm/clip-rate flags any aux-dominated
-# arm post-hoc (raw BCE ≈ 0.7 vs L_select ≈ 0.05–0.1, so balance ~ λ_hot ∈
-# [0.1,0.3]; the log sweep brackets it). Gate: punishing-opponent autopsy
-# (avoidable ↓, missed-win ~1.3% intact) + Test-B + inline D1/WR.
+# Ya_hotHead — 4-arm λ_hot screen [DONE 2026-06-12 — series-Y.md]. The aux
+# hot-piece BCE head broke the select wall: punishing avoidable 12%→1.64%
+# (λ=1.0), Test-B hot-give 16%→4.5%, place intact, monotonic in λ. Block
+# recoverable from git.
+#
+# Yb_hotChamp — 10k champion-confirmation run on the Ya recipe (no code change;
+# only hyperparameters move, hence the second-letter bump Ya→Yb). 4 arms on the
+# proven λ_hot axis at zero marginal wall-clock (4 cores run in parallel, ~2.3d
+# either way):
+#   1) λ_hot=0.3  (SEED 5) — conservative bracket, best place preservation
+#   2) λ_hot=1.0  (SEED 5) — leading candidate
+#   3) λ_hot=1.0  (SEED 7) — seed-robustness of the leading candidate
+#   4) λ_hot=2.0  (SEED 5) — frontier extension: does more select pressure keep
+#                            paying, or tip into the X(3) place-corruption
+#                            regime? (watch Test-A — λ>1.0 is the danger zone)
+# Gate: punishing-opponent autopsy (avoidable ↓, missed-win ~1.3% intact) +
+# Test-B + inline D1/WR; confirm the λ=1.0 place-tax doesn't compound at 10k
+# before crowning. SEED is the new sweepable trainRL.py knob (was hardcoded).
+_YB_BASE = {
+    "ARCHITECTURE": "QuartoCNNAutoregUnifiedS4Hot",
+    "USE_MINIMAX_SELECT_TARGET": True,
+    "MINIMAX_SELECT_DEPTH": 2,
+    "MINIMAX_DISABLE_AFTER_EPOCH": None,
+    "N_LAST_STATES_INIT": 4,
+    "EPOCHS": "10_000",
+    "LAMBDA_PLACE_WIN": 0.5,
+}
 MULTI_PARAMS = [
-    {
-        "ARCHITECTURE": "QuartoCNNAutoregUnifiedS4Hot",
-        "USE_MINIMAX_SELECT_TARGET": True,
-        "MINIMAX_SELECT_DEPTH": 2,
-        "MINIMAX_DISABLE_AFTER_EPOCH": None,
-        "N_LAST_STATES_INIT": 4,
-        "EPOCHS": "6_000",
-        "LAMBDA_PLACE_WIN": 0.5,
-        "LAMBDA_HOT": 0.03,
-        "_label": "HOT_0.03",
-    },
-    {
-        "ARCHITECTURE": "QuartoCNNAutoregUnifiedS4Hot",
-        "USE_MINIMAX_SELECT_TARGET": True,
-        "MINIMAX_SELECT_DEPTH": 2,
-        "MINIMAX_DISABLE_AFTER_EPOCH": None,
-        "N_LAST_STATES_INIT": 4,
-        "EPOCHS": "6_000",
-        "LAMBDA_PLACE_WIN": 0.5,
-        "LAMBDA_HOT": 0.1,
-        "_label": "HOT_0.1",
-    },
-    {
-        "ARCHITECTURE": "QuartoCNNAutoregUnifiedS4Hot",
-        "USE_MINIMAX_SELECT_TARGET": True,
-        "MINIMAX_SELECT_DEPTH": 2,
-        "MINIMAX_DISABLE_AFTER_EPOCH": None,
-        "N_LAST_STATES_INIT": 4,
-        "EPOCHS": "6_000",
-        "LAMBDA_PLACE_WIN": 0.5,
-        "LAMBDA_HOT": 0.3,
-        "_label": "HOT_0.3",
-    },
-    {
-        "ARCHITECTURE": "QuartoCNNAutoregUnifiedS4Hot",
-        "USE_MINIMAX_SELECT_TARGET": True,
-        "MINIMAX_SELECT_DEPTH": 2,
-        "MINIMAX_DISABLE_AFTER_EPOCH": None,
-        "N_LAST_STATES_INIT": 4,
-        "EPOCHS": "6_000",
-        "LAMBDA_PLACE_WIN": 0.5,
-        "LAMBDA_HOT": 1.0,
-        "_label": "HOT_1.0",
-    },
+    {**_YB_BASE, "LAMBDA_HOT": 0.3, "SEED": 5, "_label": "HOT_0.3"},
+    {**_YB_BASE, "LAMBDA_HOT": 1.0, "SEED": 5, "_label": "HOT_1.0"},
+    {**_YB_BASE, "LAMBDA_HOT": 1.0, "SEED": 7, "_label": "HOT_1.0_seedB"},
+    {**_YB_BASE, "LAMBDA_HOT": 2.0, "SEED": 5, "_label": "HOT_2.0"},
 ]
 
 # Path to the original training script
