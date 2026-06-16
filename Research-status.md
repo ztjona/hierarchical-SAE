@@ -8,17 +8,24 @@ result paragraphs here under "Recent results" when a sweep concludes.
 
 ## Champion
 
-- **`Ve_oracleAblation(4)0522_DISABLE_NEVER_10k`** — **87.2% WR vs `bot_loss-BT`
-  (peak 88.9%), 93.8% vs `bot_random` (peak 94.8%)**, loss 0.053,
-  `loss_select` 0.041. Same recipe as Ve(1) — Sa(3) unified-autoreg trunk
-  (`QuartoCNNAutoregUnifiedS4`) with `td_place_minimax_select` targets
-  at depth=2, oracle always on — extended to 10000 epochs. Trends still
-  rising at +0.65 / +0.44 pp/1000ep against BT / random at run end.
-  **D1: best on record — `safe_piece_recall=0.846`,
-  `forcing_loss_bottom_recall=0.968`, ρ̄=0.610** (vs Ve(1) @6k: 0.821,
-  0.957, 0.578). Both heads improve with more oracle-supervised training.
-  Supersedes ME(2) by **+13.5 pp WR vs BT** and Ve(1) by +2.0 pp WR / +2.5
-  pp safe-piece recall. See `docs/diary/series-V.md`.
+- **`Yb_hotChamp(2)0612_HOT_1.0`** — **95.1% WR vs `bot_loss-BT` (peak 96.2%),
+  97.4% vs `bot_random` (peak 98.1%)**, `loss_select` 0.011. Crowned 2026-06-16.
+  X(1) recipe (Sa(3) unified-autoreg trunk + `td_place_minimax_select` depth-2
+  oracle always on + `LAMBDA_PLACE_WIN=0.5` place hinge) **plus the Y-series
+  `QuartoCNNAutoregUnifiedS4Hot` aux hot-piece BCE head at `LAMBDA_HOT=1.0`**,
+  10000 epochs. **Gate (punishing autopsy, 20k games + Test-A/B):** in-play
+  **avoidable rate 0.99%** (Ve(4) baseline 10.74% → ~11× reduction), hot-give
+  3.4%, **place intact** (Test-A 96.5%, missed-win 1.58% — the λ=1.0 place tax did
+  *not* compound at 10k, it recovered from 6k). **D1: `safe_piece_recall=0.962`,
+  ρ̄=0.745** (Ve(4): 0.846, 0.610). Reproduced by seedB (95.1% WR, avoidable
+  0.95%). Supersedes Ve(4) by **+7.9 pp WR vs BT**. See `docs/diary/series-Y.md`.
+  *The hot head is a training-time scaffold — discardable at inference; the
+  deployed net is the standard `(q_place, q_select)` unified-autoreg policy.*
+- **Prior champion (superseded 2026-06-16):**
+  **`Ve_oracleAblation(4)0522_DISABLE_NEVER_10k`** — 87.2% WR vs BT (peak 88.9%),
+  93.8% vs random. Sa(3) trunk + depth-2 oracle always on, 10k epochs, no aux hot
+  head. D1 `safe_piece_recall=0.846`, ρ̄=0.610. Held the champion slot 2026-05-24
+  → 2026-06-16. The reference non-hot oracle recipe. See `docs/diary/series-V.md`.
 - **Prior champion (superseded 2026-05-24):**
   `ME_endgame(2)0429_ENDGAME_FRACTION_0.5` — 73.7% WR vs BT, 85.8% vs
   random. Held the champion slot 2026-04-29 → 2026-05-24. M-series
@@ -38,7 +45,34 @@ result paragraphs here under "Recent results" when a sweep concludes.
 - **Earlier candidate:** `Sa_archScan(3)0512_ARCH_S4_uniform512` — 73.5%
   WR; trunk used by all T/V runs.
 
-## Current Open Problem — Q_select "saturation" [**RESOLVED as metric artefact, 2026-05-24**]
+## Current Open Problem — the forced-exposure floor [**OPEN, 2026-06-16**]
+
+> **The select wall is closed; the *forced* floor is now the wall.** Yb crowned
+> `λ_hot=1.0` champion (avoidable rate 0.99% vs a punisher — the in-play select
+> blunder is essentially solved). But the **forced loss rate barely moved**:
+> Ve(4) 11.06% → Yb λ=1.0 **9.0%** (and λ does not buy more — Ya's −17% side-effect
+> did not continue scaling at 10k). Forced losses are now **~90% of the residual**
+> (1800 of 1998 losses at λ=1.0). A *forced* loss = the agent reached a position
+> where **every** legal give hands the opponent a win; no select head, however
+> good, can escape it. The lever is **mid-game placement that avoids walking into
+> zugzwang** — i.e. planning/lookahead in the *place* policy, not the give.
+>
+> **What we know rules out the easy fixes:** (a) more select pressure (higher
+> λ_hot) is exhausted — λ=2.0 only corrupts the place head; (b) deeper *select*
+> oracle (Ta depth-1→2→4) never touched forced exposure; (c) Xa X(2) DEPTH_3 was
+> dominated by the cheap PLACE_WIN hinge *on the forced rate itself* — so naïve
+> depth-3 minimax-place targets are not obviously the answer either. **A genuinely
+> new strategy is needed.** Candidate directions to scope (not yet screened):
+> place-side **multi-ply minimax/oracle targets** (distill a depth-≥3 *place*
+> oracle, the un-tried analogue of the select oracle that broke the give wall); an
+> **auxiliary "forcing-danger" head** (BCE on "this placement leaves me with ≤k
+> safe gives next ply", the place-side analogue of the hot head that just worked);
+> or explicit **rollout/MCTS shaping at train time** (kept out of inference per the
+> standing pure-learned-policy constraint). Open a Z-series to screen these.
+>
+> Below: the prior (resolved) open problem, preserved for context.
+
+## Prior Open Problem — Q_select "saturation" [**RESOLVED — metric artefact (2026-05-24) + in-play wall broken by Ya/Yb (2026-06-16)**]
 
 > **[2026-05-24 — closed.]** D1 has now scanned every relevant family
 > (T, V, O, S). Pre-T runs (O, S — never oracle-supervised) land at
@@ -155,9 +189,30 @@ at least one of D1/D2/D3 returning evidence for an architectural mechanism.
 | V | minimax-oracle ablation mid-training | Sa(3) + T-recipe | **done 2026-05-24** — `series-V.md`; Ve(4) @10k = **new champion (87.2% WR, D1 best-on-record)** — supersedes ME(2); Ve(1)/(2)/(3) D1 confirmed oracle is persistent driver not warmup |
 | W | N_LAST_STATES sweep on Ve recipe | Sa(3) + T-recipe | done 2026-06-04 — `series-W.md`; D1 inverted-U peaks at N=8 (best D1, WR tied with champion) |
 | X | competence-lever screen (place-win / depth-3 / select-margin) | Sa(3) + T-recipe + aux hinge | **done 2026-06-08** — `series-X.md`; **X(1) PLACE_WIN wins** (loss-rate −1.46pp, no WR/D1 regression) → promote to 10k. Depth-3 dominated; select-margin rejected *at λ=0.5* (loss-scale artifact, corrected 2026-06-09 — retest scale-balanced in Y) |
-| Y | select-pressure into trunk (aux hot-piece BCE head) | `QuartoCNNAutoregUnifiedS4Hot` + T-recipe + X(1) place hinge | **done 2026-06-12** — `series-Y.md`; **gate PASS — the select wall breaks.** Ya 4-arm `λ_hot` screen: punishing **avoidable 12%→1.64%** (λ=1.0), Test-B hot-give **16%→4.5%**, place intact. Promote λ∈{0.3,1.0} to 10k. Stage B (wire `σ(hot)` into q_select) unmotivated; margin-hinge alternative dropped. |
+| Y | select-pressure into trunk (aux hot-piece BCE head) | `QuartoCNNAutoregUnifiedS4Hot` + T-recipe + X(1) place hinge | **done 2026-06-16** — `series-Y.md`. Ya (6k screen): select wall breaks, punishing **avoidable 12%→1.64%** (λ=1.0). Yb (10k promotion): **λ=1.0 = NEW CHAMPION** — avoidable **0.99%**, place intact (Test-A 96.5%, tax did not compound), reproduced by seedB; λ=2.0 rejected (place corruption). **Forced floor now the wall** (9.0%, ~90% of losses). |
+| **Z?** | **forced-exposure / mid-game planning** (place-side lookahead) | TBD — `series-Z.md` | **queued** — the select lever is exhausted; need a new strategy for the forced floor. See Open Problem + forward queue #1. |
 
 ## Recent results
+
+### Yb_hotChamp — 10k promotion — 2026-06-16 (4 arms @ 10000 epochs) — **NEW CHAMPION (λ=1.0)**
+
+Promotion of the Ya winners to 10k: bracket λ∈{0.3,1.0} + a λ=2.0 push + a λ=1.0
+seedB. Gate = punishing autopsy (20k games) + Test-A/B, `--architecture
+QuartoCNNAutoregUnifiedS4Hot`. Full write-up [`docs/diary/series-Y.md`](docs/diary/series-Y.md).
+
+| arm | punish avoidable% | forced% | missed-win% | Test-A | hot-give | WR vs BT | D1 safe |
+|---|---|---|---|---|---|---|---|
+| Ve(4) champ | 10.74 | 11.06 | — | 87.4% | 20.2% | 87.2 | 0.846 |
+| Yb λ=0.3 | 1.66 | 10.36 | **0.98** | **97.5%** | 4.1% | 94.5 | 0.973 |
+| **Yb λ=1.0** | **0.99** | 9.00 | 1.58 | 96.5% | 3.4% | **95.1** | 0.962 |
+| Yb λ=1.0 seedB | **0.95** | 8.19 | 1.45 | 97.7% | **2.0%** | **95.1** | 0.976 |
+| Yb λ=2.0 | 1.43 | 8.01 | **3.93** | **93.1%** | 3.3% | 94.3 | 0.967 |
+
+**`Yb λ=1.0` crowned champion** (+7.9pp WR over Ve(4); avoidable ~11× lower; place
+intact — the 6k place tax *recovered* at 10k, Test-A 95.6%→96.5%; reproduced by
+seedB). **λ=2.0 rejected** — place corruption (Test-A 93.1%, missed-win 3.93%),
+confirming the ">1.0 watch Test-A" warning. **The give wall is closed; the forced
+floor (9.0%, ~90% of losses) barely moved and is now the open problem** (above).
 
 ### Ya_hotHead — select-pressure into the trunk — 2026-06-12 (4 arms @ 6000 epochs) — **THE SELECT WALL BREAKS**
 
@@ -393,15 +448,22 @@ Saturation is **not** a head-level pathology. Full write-up in
 learned policy — no inference-time tactical search.** All WR fixes land in the
 weights.
 
-1. **`S4Hot` λ_hot 10k — champion challenger (next run).** Ya_hotHead
-   (2026-06-12, `series-Y.md`) broke the select wall on the X(1) recipe (which
-   already carries the PLACE_WIN place hinge): punishing avoidable **12%→1.64%**,
-   Test-B hot-give **16%→4.5%**, place intact, **WR 94.4% BT / 97.0% random at 6k
-   — already past `Ve(4)@10k` (87.2%/93.8%)**, still rising. Promote a tuned **10k**
-   run, **bracketing λ_hot∈{0.3, 1.0}** (λ=0.3 = cleanest place preservation;
-   λ=1.0 = best gate+WR at a marginal place tax that must be re-checked at 10k).
-   This is now the path to dethroning Ve(4) — supersedes the bare "PLACE_WIN @ 10k"
-   item (the place hinge is folded into the Ya recipe).
+1. **Forced-exposure / mid-game planning — THE WALL (open a Z-series).** With Yb
+   crowning `λ_hot=1.0` (avoidable 0.99% vs a punisher), the give wall is closed and
+   the **forced floor barely moved**: Ve(4) 11.06% → Yb **9.0%**, and λ does not buy
+   more (λ=2.0 only corrupts place). Forced losses are ~90% of the residual. A
+   *forced* loss = a reached position where every legal give loses — escapable only
+   by **placement that avoids zugzwang**, i.e. planning in the *place* policy.
+   Easy fixes are ruled out (more λ_hot exhausted; deeper *select* oracle never
+   touched forced exposure; Xa X(2) depth-3 was dominated by the cheap PLACE_WIN
+   hinge *on the forced rate itself*). **Screen genuinely new place-side strategies
+   (Z-series):** (a) distill a **depth-≥3 *place* oracle** (the un-tried analogue of
+   the select oracle that broke the give wall — re-scoped from the dropped depth-3
+   idea, now place-side not select-side); (b) an **auxiliary "forcing-danger" head**
+   (BCE on "this placement leaves ≤k safe gives next ply" — the place-side analogue
+   of the hot head that just worked); (c) **train-time rollout/MCTS shaping** (kept
+   out of inference per the pure-learned-policy constraint). Gate on the punishing
+   autopsy **forced rate** (and place Test-A intact). See Open Problem.
 2. ~~**Deeper oracle / planning (depth-3)**~~ — **dropped 2026-06-08.** Xa X(2)
    DEPTH_3 was dominated: −0.22pp loss-rate only, and PLACE_WIN beat it on the
    very forced rate depth-3 was meant to uniquely own (2.08 vs 2.96%), at lower
@@ -449,13 +511,10 @@ weights.
      better give can't touch forced positions. Best case ≈ ~22%→~10% (the forced
      floor), not zero. The 6.6% `champion_init` is select-only / not deployable /
      a static optimistic reference — measure the real combine vs punishing.
-8. **Forced-exposure / planning lever — NOW THE WALL (select lever landed).**
-   Ya cut the avoidable half to 1.64%, so the **forced ~8.7% vs punishing now
-   dominates — 84% of the residual loss** at λ=1.0 (and Ya already nudged it
-   −17% absolute as a side-effect of the hot trunk). Reaching zugzwang where every
-   give is hot needs mid-game planning (don't walk into forced positions) — the
-   real content of the demoted depth-3 idea, re-motivated by the punishing metric.
-   **This is the next frontier after the Ya 10k promotion.**
+8. **[PROMOTED TO #1, 2026-06-16.]** Forced-exposure / planning lever — confirmed
+   the wall at 10k. Yb λ=1.0 forced rate 9.0% = ~90% of the residual, and λ did
+   **not** continue to buy forced-floor reduction (Ya's −17% side-effect was a
+   one-off, not λ-scaling). Now the lead item — see #1.
 4. **Sa(3) 10k confirmation run** — re-run
    `Sa_archScan(3)0512_ARCH_S4_uniform512` at 10k epochs to lock the
    interpretability-substrate-of-record claim. **Priority raised** —
