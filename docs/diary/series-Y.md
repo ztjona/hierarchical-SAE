@@ -170,9 +170,46 @@ recipe (`S4Hot`, depth-2 minimax oracle always on, `N_LAST_STATES_INIT=4`,
    with λ at 10k — λ does not buy forced-floor reduction. This needs a **dedicated
    strategy**, not more select pressure (see Research-status open problem).
 
-**Decision.** **Crown `Yb_hotChamp(2)0612_HOT_1.0` as the new overall champion**
-(2026-06-16): 95.1% WR vs BT (+7.9pp over Ve(4)), avoidable 0.99%, place intact,
-reproduced by seedB. λ=2.0 rejected (place corruption). The select lever is now
+**Decision.** **Crown `Yb_hotChamp(3)0612_HOT_1.0_seedB` as the new overall
+champion** (2026-06-16): 95.1% WR vs BT (+7.9pp over Ve(4)), avoidable 0.95%, place
+intact (Test-A 97.7%). Chosen over seed A (`Yb(2)`, avoidable 0.99% / Test-A 96.5% /
+hot-give 3.4% / D1 0.962) which it dominates on nearly every gate axis at WR tied —
+the two seeds bracket *expected* performance; seedB is the deployed artifact. λ=2.0
+rejected (place corruption). The select lever is now
 **exhausted** — the next frontier is the **forced-exposure / mid-game planning
 floor**, which neither oracle-select-distillation nor the hot trunk meaningfully
 touches.
+
+### Hot-head-at-inference diagnostic — 2026-06-16 — **Stage B empirically closed**
+
+Probe: could the aux hot head *replace* `q_select` at the give, and does the gap
+reveal whether `fc2_select` under-reads the trunk? Added `audit.py --use-hot-head`
+(scores Test B with `argmin(hot_logits)` alongside the deployed `argmax(q_select)`
+and reports their agreement). Run on the three λ∈{0.3,1.0,1.0-seedB} 10k checkpoints:
+
+| arm | Test-B `argmax(q_select)` | Test-B `argmin(hot)` | select↔hot agreement |
+|---|---|---|---|
+| Yb(3) seedB (champ) | 0.980 | 0.978 | 73.6% |
+| Yb(2) seed A | 0.966 | 0.966 | 73.4% |
+| Yb(1) λ=0.3 | 0.959 | 0.965 | 66.4% |
+
+**Reading.**
+1. **The hot head ties the select head on Test-B** (differences are a handful of
+   states). So `q_select` is **not under-reading** the trunk's safety encoding — a
+   direct linear hot probe does no better. **Replacing select with hot would not
+   help, and Stage-B wiring (`σ(hot)`→`q_select`) / a hot-veto is confirmed
+   unmotivated — now by measurement, not assertion.**
+2. **The ~26–34% disagreement is the signal:** the heads reach the *same* Test-B
+   accuracy while choosing a *different* give a quarter of the time ⇒ they diverge
+   almost entirely among the **safe** pieces, where depth-2 `q_select` adds ranking
+   structure the depth-1 hot head lacks. Positive evidence that select carries
+   information **beyond** hotness (the depth-2 superset), not a noisy copy of it.
+3. **Agreement rises monotonically with λ_hot** (66%→74%): more hot-pressure ⇒ more
+   hotness-shaped trunk ⇒ `q_select` aligns more with the probe. Clean sanity check.
+
+**Caveat (motivates the next diagnostic).** Test-B scores only the *binary*
+immediate-loser avoidance; it is blind to choice quality *among safe pieces* —
+exactly where depth-2 lookahead and forced-exposure avoidance live. So "tied on
+Test-B, 26% disagreement" is consistent with select being strictly better in ways
+Test-B can't see. A **depth-2 Test-B** (avoid a give that is safe now but forces a
+loss next ply) is the natural probe for the forced-floor work.

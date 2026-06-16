@@ -1,5 +1,5 @@
 {
-    "champion": "Ya_hotHead_4",
+    "champion": "Yb_hotChamp_3",
     "default_opponents": [
         "random",
         "loss_BT",
@@ -7,9 +7,17 @@
         "ME_endgame",
         "Sa_archScan_3",
         "Ta_minimaxSelect_1",
-        "Ve_oracleAblation_4"
+        "Ve_oracleAblation_4",
+        "Ya_hotHead_4",
+        "minimax_depth_2"
     ],
     "bots": {
+        "Yb_hotChamp_3": {
+            "path": "CHECKPOINTS/Yb_hotChamp(3)0612_HOT_1.0_seedB/20260614_2031-Yb_hotChamp(3)0612_HOT_1.0_seedB_E_10000.pt",
+            "model_class": "QuartoCNNAutoregUnifiedS4Hot",
+            "bot_class": "Quarto_unified_bot",
+            "name": "Yb_hotChamp(3) [hot lambda=1.0, seedB, E=10000]"
+        },
         "Ya_hotHead_4": {
             "path": "CHECKPOINTS/Ya_hotHead(4)0610_HOT_1.0/20260611_1950-Ya_hotHead(4)0610_HOT_1.0_E_6000.pt",
             "model_class": "QuartoCNNAutoregUnifiedS4Hot",
@@ -51,6 +59,11 @@
             "model_class": "QuartoCNN_uncoupled",
             "bot_class": "Quarto_bot",
             "name": "Loss_BT"
+        },
+        "minimax_depth_2": {
+            "type": "minimax",
+            "depth": 2,
+            "name": "MinimaxBot (depth=2)"
         },
         "random": {
             "path": "CHECKPOINTS/EXP_id03/20250922_1247-EXP_id03_epoch_0000.pt",

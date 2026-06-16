@@ -8,17 +8,20 @@ result paragraphs here under "Recent results" when a sweep concludes.
 
 ## Champion
 
-- **`Yb_hotChamp(2)0612_HOT_1.0`** — **95.1% WR vs `bot_loss-BT` (peak 96.2%),
-  97.4% vs `bot_random` (peak 98.1%)**, `loss_select` 0.011. Crowned 2026-06-16.
-  X(1) recipe (Sa(3) unified-autoreg trunk + `td_place_minimax_select` depth-2
-  oracle always on + `LAMBDA_PLACE_WIN=0.5` place hinge) **plus the Y-series
+- **`Yb_hotChamp(3)0612_HOT_1.0_seedB`** — **95.1% WR vs `bot_loss-BT` (peak
+  96.2%), 97.5% vs `bot_random` (peak 98.3%)**, `loss_select` 0.011. Crowned
+  2026-06-16. X(1) recipe (Sa(3) unified-autoreg trunk + `td_place_minimax_select`
+  depth-2 oracle always on + `LAMBDA_PLACE_WIN=0.5` place hinge) **plus the Y-series
   `QuartoCNNAutoregUnifiedS4Hot` aux hot-piece BCE head at `LAMBDA_HOT=1.0`**,
   10000 epochs. **Gate (punishing autopsy, 20k games + Test-A/B):** in-play
-  **avoidable rate 0.99%** (Ve(4) baseline 10.74% → ~11× reduction), hot-give
-  3.4%, **place intact** (Test-A 96.5%, missed-win 1.58% — the λ=1.0 place tax did
-  *not* compound at 10k, it recovered from 6k). **D1: `safe_piece_recall=0.962`,
-  ρ̄=0.745** (Ve(4): 0.846, 0.610). Reproduced by seedB (95.1% WR, avoidable
-  0.95%). Supersedes Ve(4) by **+7.9 pp WR vs BT**. See `docs/diary/series-Y.md`.
+  **avoidable rate 0.95%** (Ve(4) baseline 10.74% → ~11× reduction), hot-give
+  2.0%, **place intact** (Test-A 97.7%, missed-win 1.45% — the λ=1.0 place tax did
+  *not* compound at 10k, it recovered from 6k). **D1: `safe_piece_recall=0.976`,
+  ρ̄=0.750** (Ve(4): 0.846, 0.610). seedB chosen over seed A (`Yb(2)`) which it
+  dominates on nearly every gate axis (seed A: avoidable 0.99%, Test-A 96.5%,
+  hot-give 3.4%, D1 0.962) at WR tied — both seeds clear the gate, so cite the pair
+  for *expected* performance. Supersedes Ve(4) by **+7.9 pp WR vs BT**. See
+  `docs/diary/series-Y.md`.
   *The hot head is a training-time scaffold — discardable at inference; the
   deployed net is the standard `(q_place, q_select)` unified-autoreg policy.*
 - **Prior champion (superseded 2026-06-16):**
@@ -194,7 +197,7 @@ at least one of D1/D2/D3 returning evidence for an architectural mechanism.
 
 ## Recent results
 
-### Yb_hotChamp — 10k promotion — 2026-06-16 (4 arms @ 10000 epochs) — **NEW CHAMPION (λ=1.0)**
+### Yb_hotChamp — 10k promotion — 2026-06-16 (4 arms @ 10000 epochs) — **NEW CHAMPION (λ=1.0, seedB)**
 
 Promotion of the Ya winners to 10k: bracket λ∈{0.3,1.0} + a λ=2.0 push + a λ=1.0
 seedB. Gate = punishing autopsy (20k games) + Test-A/B, `--architecture
@@ -204,13 +207,14 @@ QuartoCNNAutoregUnifiedS4Hot`. Full write-up [`docs/diary/series-Y.md`](docs/dia
 |---|---|---|---|---|---|---|---|
 | Ve(4) champ | 10.74 | 11.06 | — | 87.4% | 20.2% | 87.2 | 0.846 |
 | Yb λ=0.3 | 1.66 | 10.36 | **0.98** | **97.5%** | 4.1% | 94.5 | 0.973 |
-| **Yb λ=1.0** | **0.99** | 9.00 | 1.58 | 96.5% | 3.4% | **95.1** | 0.962 |
-| Yb λ=1.0 seedB | **0.95** | 8.19 | 1.45 | 97.7% | **2.0%** | **95.1** | 0.976 |
+| Yb λ=1.0 (seed A) | 0.99 | 9.00 | 1.58 | 96.5% | 3.4% | **95.1** | 0.962 |
+| **Yb λ=1.0 seedB** | **0.95** | 8.19 | 1.45 | 97.7% | **2.0%** | **95.1** | 0.976 |
 | Yb λ=2.0 | 1.43 | 8.01 | **3.93** | **93.1%** | 3.3% | 94.3 | 0.967 |
 
-**`Yb λ=1.0` crowned champion** (+7.9pp WR over Ve(4); avoidable ~11× lower; place
-intact — the 6k place tax *recovered* at 10k, Test-A 95.6%→96.5%; reproduced by
-seedB). **λ=2.0 rejected** — place corruption (Test-A 93.1%, missed-win 3.93%),
+**`Yb λ=1.0 seedB` crowned champion** (+7.9pp WR over Ve(4); avoidable ~11× lower;
+place intact — the 6k place tax *recovered* at 10k; chosen over seed A, which it
+dominates on nearly every gate axis at WR tied). **λ=2.0 rejected** — place
+corruption (Test-A 93.1%, missed-win 3.93%),
 confirming the ">1.0 watch Test-A" warning. **The give wall is closed; the forced
 floor (9.0%, ~90% of losses) barely moved and is now the open problem** (above).
 

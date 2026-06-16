@@ -30,6 +30,7 @@ from quartopy import play_games
 from bot.CNN_bot import Quarto_bot
 from bot.CNN_unified_bot import Quarto_bot as Quarto_unified_bot
 from bot.CNN_autoreg_bot import Quarto_bot as Quarto_autoreg_bot
+from bot.minimax_bot import MinimaxBot
 
 from models.CNN1 import QuartoCNN
 from models.CNN_uncoupled import QuartoCNN as QuartoCNN_uncoupled
@@ -66,6 +67,9 @@ def load_config(config_path: Path) -> dict:
 def load_bot(bot_key: str, config: dict) -> tuple:
     """Load a bot from a config dict entry."""
     bot_cfg = config["bots"][bot_key]
+    if bot_cfg.get("type") == "minimax":
+        bot = MinimaxBot(depth=bot_cfg.get("depth", 2))
+        return bot, bot_cfg["name"]
     model_class = _MODEL_REGISTRY[bot_cfg["model_class"]]
     bot_class = _BOT_REGISTRY[bot_cfg["bot_class"]]
     bot = bot_class(

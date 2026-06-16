@@ -333,6 +333,31 @@ def _argmax_legal_piece(
     return max(available, key=lambda p: q_select[p.index()])
 
 
+@torch.no_grad()
+def _hot_logits_single(
+    net: torch.nn.Module,
+    state_board: np.ndarray,
+    state_aux: np.ndarray,
+) -> np.ndarray:
+    """Return the aux hot-head logits (shape 16,) for a single SELECT state.
+
+    Higher logit = the head judges *giving* this piece more likely to be an
+    immediate (depth-1) loser, so the safety-maximising give is ``argmin``.
+    """
+    device = next(net.parameters()).device
+    sb = torch.from_numpy(state_board[None]).to(device)   # (1, 16, 4, 4)
+    sa = torch.from_numpy(state_aux[None]).to(device)     # (1, 32)
+    logits = net.hot_logits(sb, sa)
+    return logits[0].cpu().numpy()
+
+
+def _argmin_legal_piece_hot(
+    hot_logits: np.ndarray, available: list[Piece]
+) -> Piece:
+    """Pick the legal give the hot head judges *least* likely to be hot."""
+    return min(available, key=lambda p: hot_logits[p.index()])
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Test A / B / C  (per-position; rely on game simulation)
 # ──────────────────────────────────────────────────────────────────────
@@ -342,8 +367,15 @@ def run_tests_abc(
     net: torch.nn.Module,
     place_states: list[_PlaceState],
     select_states: list[_SelectState],
+    use_hot_head: bool = False,
 ) -> dict:
-    """Run Tests A (PLACE states), B (SELECT states), C (PLACE states)."""
+    """Run Tests A (PLACE states), B (SELECT states), C (PLACE states).
+
+    When ``use_hot_head`` is set (model must expose ``hot_logits``), Test B
+    additionally scores the give chosen by ``argmin`` over the aux hot head and
+    its agreement with the deployed ``argmax(q_select)`` choice — a diagnostic of
+    whether ``fc2_select`` under-reads the trunk's safety representation.
+    """
 
     # ── Test A ────────────────────────────────────────────────────────
     a_total = a_correct = 0
@@ -368,6 +400,7 @@ def run_tests_abc(
     # Use SELECT-phase states directly: board is post-placement, aux has
     # available pieces (no offered piece since SELECT is in progress).
     b_total = b_correct = b_forced_loss = 0
+    b_hot_correct = b_agree = 0  # hot-head diagnostic (only if use_hot_head)
     for ss in tqdm(select_states, desc="Test B (losing-piece avoidance)"):
         board, empties = _board_from_encoding(ss.state_board)
         available_mask = ss.state_aux[16:]
@@ -389,6 +422,14 @@ def run_tests_abc(
         chosen_piece = _argmax_legal_piece(q_select, available)
         if chosen_piece not in losing:
             b_correct += 1
+
+        if use_hot_head:
+            hot = _hot_logits_single(net, ss.state_board, ss.state_aux)
+            hot_piece = _argmin_legal_piece_hot(hot, available)
+            if hot_piece not in losing:
+                b_hot_correct += 1
+            if hot_piece.index() == chosen_piece.index():
+                b_agree += 1
 
     # ── Test C ────────────────────────────────────────────────────────
     c_fractions: list[float] = []
@@ -417,7 +458,7 @@ def run_tests_abc(
             chosen_cells.add(_argmax_legal_cell(q_place, empties))
         c_fractions.append(len(chosen_cells) / len(candidates))
 
-    return {
+    result = {
         "test_A_winning_placement": {
             "n_winnable": a_total,
             "n_correct": a_correct,
@@ -435,6 +476,19 @@ def run_tests_abc(
             "median_distinct_fraction": float(np.median(c_fractions)) if c_fractions else None,
         },
     }
+
+    if use_hot_head:
+        # Same auditable states as Test B; head used = argmin(hot) instead of
+        # argmax(q_select). 'agreement' = fraction where both heads pick the
+        # same legal give (over the non-forced auditable set).
+        result["test_B_hot_head"] = {
+            "n_auditable": b_total,
+            "n_correct": b_hot_correct,
+            "accuracy": (b_hot_correct / b_total) if b_total else None,
+            "agreement_with_select": (b_agree / b_total) if b_total else None,
+        }
+
+    return result
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -612,6 +666,7 @@ def audit_experiment(
     batch_size: int = 1024,
     include_epoch_0: bool = False,
     architecture: str | None = None,
+    use_hot_head: bool = False,
 ) -> list[dict]:
     """Audit one experiment; returns list of JSONL records emitted."""
     print(f"\n{'='*60}")
@@ -631,6 +686,13 @@ def audit_experiment(
         resolved_epoch = cfg["epoch"]
         print(f"\n-- epoch {resolved_epoch} ({cfg['architecture']}) --")
 
+        if use_hot_head and not hasattr(net, "hot_logits"):
+            raise ValueError(
+                f"--use-hot-head requires a model with a hot head (hot_logits); "
+                f"{cfg['architecture']} has none. Use a QuartoCNNAutoregUnifiedS4Hot "
+                f"checkpoint (and pass --architecture QuartoCNNAutoregUnifiedS4Hot)."
+            )
+
         print("Sampling states …")
         place_states, select_states = sample_states(
             net,
@@ -640,7 +702,7 @@ def audit_experiment(
         print(f"  PLACE: {len(place_states)}  SELECT: {len(select_states)}")
 
         print("Running Tests A / B / C …")
-        abc = run_tests_abc(net, place_states, select_states)
+        abc = run_tests_abc(net, place_states, select_states, use_hot_head=use_hot_head)
 
         print("Running Tests D / E …")
         de = run_tests_de(net, place_states, batch_size=batch_size)
@@ -697,6 +759,10 @@ def _print_summary(record: dict) -> None:
           f"  (n={a.get('n_winnable', 0)})")
     print(f"    B  losing-piece avoid accuracy : {_fmt(b.get('accuracy'))}"
           f"  (n={b.get('n_auditable', 0)})")
+    bh = record.get("test_B_hot_head")
+    if bh:
+        print(f"    B* hot-head avoid accuracy     : {_fmt(bh.get('accuracy'))}"
+              f"   (select↔hot agreement {_fmt(bh.get('agreement_with_select'))})")
     print(f"    C  piece sensitivity (mean frac): {_fmt(c.get('mean_distinct_fraction'))}"
           f"  (n={c.get('n_positions', 0)})")
     print(f"    D  Q-occ gap  (mean / frac>0)  : "
@@ -733,6 +799,10 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Forward-pass batch size for Tests D / E")
     p.add_argument("--architecture", default=None,
                    help="Override architecture (default: auto-inferred from exp name)")
+    p.add_argument("--use-hot-head", action="store_true",
+                   help="Also score Test B using argmin(aux hot head) and report its "
+                        "accuracy + agreement with argmax(q_select). Requires a model "
+                        "with a hot head (QuartoCNNAutoregUnifiedS4Hot).")
     return p
 
 
@@ -770,6 +840,7 @@ def main() -> None:
                 batch_size=args.batch_size,
                 include_epoch_0=args.include_epoch_0,
                 architecture=args.architecture,
+                use_hot_head=args.use_hot_head,
             )
             all_records.extend(recs)
         except Exception as exc:
