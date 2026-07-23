@@ -1,21 +1,39 @@
 # -*- coding: utf-8 -*-
 
-"""Benchmark the current champion against previous champions and baselines.
+"""Benchmark champion(s) against previous champions and baselines.
+
+Single champion (default) writes one champion's row of the head-to-head matrix.
+Pass --champions to run a full round-robin in one invocation (every listed
+champion vs every other listed champion + the baseline opponents), which is what
+the Atlas head-to-head matrix needs to be dense. See
+CHAMPION-HEAD-TO-HEAD.md in the repo root.
 
 Usage:
-  benchmark_champion.py [--config=<file>] [--matches=<n>] [--output=<file>] [--opponents=<list>] [--verbose]
+  benchmark_champion.py [options]
   benchmark_champion.py -h | --help
 
 Options:
-  --config=<file>     Path to champion config JSON. Defaults to champion_config.json
-                      in the same directory as this script.
-  --matches=<n>       Number of matches per direction [default: 500].
-  --output=<file>     Output JSONL file path [default: champion-results.jsonl].
-  --opponents=<list>  Comma-separated opponent keys from the config to benchmark against.
-                      Defaults to the 'default_opponents' list in the config file.
-  --verbose           Print detailed output during games.
-  -h --help           Show this screen.
+  --config=<file>      Path to champion config JSON. Defaults to champion_config.json
+                       in the same directory as this script.
+  --matches=<n>        Number of matches per direction [default: 500].
+  --output=<file>      Output JSONL file path [default: champion-results.jsonl].
+  --opponents=<list>   Comma-separated opponent keys from the config to benchmark against.
+                       Defaults to the 'default_opponents' list in the config file.
+  --champion=<key>     Override config["champion"] for this run (single champion).
+  --round-robin=<list> Comma-separated champion keys to run as a full round-robin: each
+                       plays every other listed champion plus the baseline opponents,
+                       all written to one --output file. Overrides --champion/--opponents.
+  --append             Append to --output instead of overwriting (implied by --round-robin).
+  --verbose            Print detailed output during games.
+  -h --help            Show this screen.
 """
+
+# Examples (kept OUT of the docstring: docopt parses the docstring, and a
+# continuation line starting with "--" is misread as an option definition):
+#   Single champion (overwrites champion-results.jsonl):
+#     python tools/benchmark_champion.py --champion=Ve_oracleAblation_4
+#   Full round-robin across all five champions into one file:
+#     python tools/benchmark_champion.py --output=champion-results.jsonl --round-robin=Aa_replay,Sa_archScan_3,Ta_minimaxSelect_1,Ve_oracleAblation_4,Yb_hotChamp_3
 
 import sys
 import json
@@ -35,7 +53,10 @@ from bot.minimax_bot import MinimaxBot
 from models.CNN1 import QuartoCNN
 from models.CNN_uncoupled import QuartoCNN as QuartoCNN_uncoupled
 from models.CNN_autoreg import QuartoCNNAutoreg
-from models.CNN_autoreg_sa import QuartoCNNAutoregUnifiedS4, QuartoCNNAutoregUnifiedS4Hot
+from models.CNN_autoreg_sa import (
+    QuartoCNNAutoregUnifiedS4,
+    QuartoCNNAutoregUnifiedS4Hot,
+)
 
 # Registry mapping string names used in champion_config.json to actual classes.
 # Add a new entry here whenever a new model or bot class is introduced.
@@ -87,10 +108,14 @@ def benchmark_champion(
     opponents: list | None = None,
     output_path: str = "champion-results.jsonl",
     verbose: bool = False,
+    champion_key: str | None = None,
+    append: bool = False,
 ) -> None:
-    resolved_opponents: list = opponents if opponents is not None else config.get("default_opponents", [])
+    resolved_opponents: list = (
+        opponents if opponents is not None else config.get("default_opponents", [])
+    )
 
-    champion_key = config["champion"]
+    champion_key = champion_key or config["champion"]
     champion_bot, champion_name = load_bot(champion_key, config)
     print(f"\n{'='*60}")
     print(f"Benchmarking Champion: {champion_name}")
@@ -177,7 +202,7 @@ def benchmark_champion(
     output_file = Path(output_path)
     output_file.parent.mkdir(parents=True, exist_ok=True)
 
-    with open(output_file, "w") as f:
+    with open(output_file, "a" if append else "w") as f:
         for result in results:
             f.write(json.dumps(result) + "\n")
 
@@ -198,6 +223,59 @@ def benchmark_champion(
     print()
 
 
+def benchmark_round_robin(
+    config: dict,
+    champion_keys: list,
+    matches: int = 500,
+    output_path: str = "champion-results.jsonl",
+    verbose: bool = False,
+) -> None:
+    """Run every listed champion vs every other listed champion + baselines.
+
+    Baseline opponents = the config's default_opponents that are NOT themselves
+    in champion_keys (so champion-vs-champion pairs are not double-counted with a
+    different a/b orientation). All rows land in one --output file; it is
+    truncated once up front, then each champion's block is appended.
+    """
+    all_keys = set(config["bots"].keys())
+    for k in champion_keys:
+        if k not in all_keys:
+            raise SystemExit(
+                f"Error: unknown champion key '{k}'. "
+                f"Available: {', '.join(sorted(all_keys))}"
+            )
+
+    default_opponents = config.get("default_opponents", [])
+    baseline_opponents = [o for o in default_opponents if o not in champion_keys]
+
+    # Truncate once so re-running the round-robin is idempotent.
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("")
+
+    print(f"\n{'#'*60}")
+    print(f"ROUND-ROBIN: {len(champion_keys)} champions -> {output_path}")
+    print(f"Champions : {champion_keys}")
+    print(f"Baselines : {baseline_opponents}")
+    print(f"{'#'*60}")
+
+    for k in champion_keys:
+        opponents = [c for c in champion_keys if c != k] + baseline_opponents
+        benchmark_champion(
+            config=config,
+            matches=matches,
+            opponents=opponents,
+            output_path=output_path,
+            verbose=verbose,
+            champion_key=k,
+            append=True,
+        )
+
+    print(f"{'#'*60}")
+    print(f"Round-robin complete -> {out.absolute()}")
+    print(f"{'#'*60}\n")
+
+
 def main():
     args = docopt(__doc__)
 
@@ -208,9 +286,27 @@ def main():
     output_path = args["--output"]
     verbose = args["--verbose"]
 
+    # Round-robin mode short-circuits the single-champion path.
+    if args["--round-robin"]:
+        champion_keys = [c.strip() for c in args["--round-robin"].split(",")]
+        benchmark_round_robin(
+            config=config,
+            champion_keys=champion_keys,
+            matches=matches,
+            output_path=output_path,
+            verbose=verbose,
+        )
+        return
+
+    champion_key = args["--champion"] or config["champion"]
+    if champion_key not in config["bots"]:
+        print(f"Error: Unknown champion '{champion_key}'")
+        print(f"Available bots: {', '.join(sorted(config['bots'].keys()))}")
+        return
+
     if args["--opponents"]:
         opponents = [o.strip() for o in args["--opponents"].split(",")]
-        valid_opponents = set(config["bots"].keys()) - {config["champion"]}
+        valid_opponents = set(config["bots"].keys()) - {champion_key}
         for opp in opponents:
             if opp not in valid_opponents:
                 print(f"Error: Unknown opponent '{opp}'")
@@ -225,6 +321,8 @@ def main():
         opponents=opponents,
         output_path=output_path,
         verbose=verbose,
+        champion_key=champion_key,
+        append=bool(args["--append"]),
     )
 
 
