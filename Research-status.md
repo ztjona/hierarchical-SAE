@@ -192,10 +192,34 @@ at least one of D1/D2/D3 returning evidence for an architectural mechanism.
 | V | minimax-oracle ablation mid-training | Sa(3) + T-recipe | **done 2026-05-24** — `series-V.md`; Ve(4) @10k = **new champion (87.2% WR, D1 best-on-record)** — supersedes ME(2); Ve(1)/(2)/(3) D1 confirmed oracle is persistent driver not warmup |
 | W | N_LAST_STATES sweep on Ve recipe | Sa(3) + T-recipe | done 2026-06-04 — `series-W.md`; D1 inverted-U peaks at N=8 (best D1, WR tied with champion) |
 | X | competence-lever screen (place-win / depth-3 / select-margin) | Sa(3) + T-recipe + aux hinge | **done 2026-06-08** — `series-X.md`; **X(1) PLACE_WIN wins** (loss-rate −1.46pp, no WR/D1 regression) → promote to 10k. Depth-3 dominated; select-margin rejected *at λ=0.5* (loss-scale artifact, corrected 2026-06-09 — retest scale-balanced in Y) |
-| Y | select-pressure into trunk (aux hot-piece BCE head) | `QuartoCNNAutoregUnifiedS4Hot` + T-recipe + X(1) place hinge | **done 2026-06-16** — `series-Y.md`. Ya (6k screen): select wall breaks, punishing **avoidable 12%→1.64%** (λ=1.0). Yb (10k promotion): **λ=1.0 = NEW CHAMPION** — avoidable **0.99%**, place intact (Test-A 96.5%, tax did not compound), reproduced by seedB; λ=2.0 rejected (place corruption). **Forced floor now the wall** (9.0%, ~90% of losses). |
+| Y | select-pressure into trunk (aux hot-piece BCE head) | `QuartoCNNAutoregUnifiedS4Hot` + T-recipe + X(1) place hinge | **done 2026-06-18** — `series-Y.md`. Ya (6k screen): select wall breaks, punishing **avoidable 12%→1.64%** (λ=1.0). Yb (10k promotion): **λ=1.0 = NEW CHAMPION** — avoidable **0.99%**, place intact (Test-A 96.5%, tax did not compound), reproduced by seedB; λ=2.0 rejected (place corruption). Yc (`N_LAST_STATES∈{6,8,12,16}` @6k): **N axis exhausted — N=4 stays the recipe** (WR ↓ monotonic, N≥12 dominated, forced floor unmoved). **Forced floor now the wall** (9.0%, ~90% of losses). |
 | **Z?** | **forced-exposure / mid-game planning** (place-side lookahead) | TBD — `series-Z.md` | **queued** — the select lever is exhausted; need a new strategy for the forced floor. See Open Problem + forward queue #1. |
 
 ## Recent results
+
+### Yc_nStates — N_LAST_STATES sweep on the hot recipe — 2026-06-18 (4 arms @ 6000 epochs) — **N axis exhausted; N=4 stays the recipe**
+
+`N_LAST_STATES ∈ {6,8,12,16}` on the hot-champion recipe (`S4Hot`, λ_hot=1.0, X(1)
+place hinge). Gate = punishing autopsy (20k games) + static Test-A/B + inline D1/WR.
+The N=4 point is the champion recipe itself (6k ref = Ya(4); 10k = Yb(3) champ).
+Full write-up [`docs/diary/series-Y.md`](docs/diary/series-Y.md) → Yc.
+
+| arm | N | WR vs BT (f/peak) | avoidable% | forced% | Test-A | hot-give | D1 safe |
+|---|---|---|---|---|---|---|---|
+| Yb(3) champ | 4 (@10k) | 95.1 / 96.2 | 0.95 | 8.19 | 97.7% | 2.0% | 0.976 |
+| Yc(1) | 6 | **94.7 / 95.6** | 1.84 | 7.99 | 95.5% | 3.1% | **0.984** |
+| Yc(2) | 8 | 94.4 / 95.3 | 2.27 | **7.00** | 94.9% | 5.1% | **0.984** |
+| Yc(3) | 12 | 93.6 / 94.6 | 3.90 | 8.18 | 92.5% | 6.9% | 0.941 |
+| Yc(4) | 16 | 93.4 / 94.5 | 2.94 | 8.90 | 92.1% | 6.8% | 0.975 |
+
+**Nothing beats N=4.** WR falls monotonically with N; N=6/8 tie best-on-record D1
+(0.984) but carry a place tax (Test-A 95.5→92.1%, missed-win rising) that grows with
+N, and **N≥12 is strictly dominated** (worse WR *and* Test-A *and* avoidable *and*
+D1). Critically the **forced floor does not move** (best 7.0% at N=8, still in the
+7–9% band) — the window controls which oracle transitions enter the buffer, not the
+placement policy that walks into zugzwang. Reproduces the series-W inverted-U on a
+second recipe. **Champion and open problem unchanged; the Z-series (place-side
+planning for the forced floor) remains the frontier.**
 
 ### Yb_hotChamp — 10k promotion — 2026-06-16 (4 arms @ 10000 epochs) — **NEW CHAMPION (λ=1.0, seedB)**
 

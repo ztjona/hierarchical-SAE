@@ -213,3 +213,56 @@ exactly where depth-2 lookahead and forced-exposure avoidance live. So "tied on
 Test-B, 26% disagreement" is consistent with select being strictly better in ways
 Test-B can't see. A **depth-2 Test-B** (avoid a give that is safe now but forces a
 loss next ply) is the natural probe for the forced-floor work.
+
+## Yc_nStates — does more `N_LAST_STATES` help the hot recipe? — 2026-06-18 (4 arms @ 6000 epochs) — **no; N=4 stays the recipe**
+
+**Hypothesis.** The W-series found an inverted-U in `N_LAST_STATES` on the *Ve*
+recipe (D1 peaks at N=8, WR tied). Yc re-runs that sweep on the **hot-champion
+recipe** (`S4Hot`, depth-2 minimax oracle always on, `LAMBDA_PLACE_WIN=0.5`,
+`LAMBDA_HOT=1.0`) to check whether a wider oracle-supervised window buys anything
+now that the select wall is closed — in particular whether it touches the **forced
+floor**. `N∈{6,8,12,16}`, 6000 epochs. The N=4 point is the champion recipe itself;
+the 6k N=4 reference is **Ya(4)** (λ=1.0), the 10k N=4 point is the **Yb(3) seedB**
+champion.
+
+**Gate.** Punishing-opponent autopsy (`loss_autopsy.py`, 20k games,
+`--architecture QuartoCNNAutoregUnifiedS4Hot`) + static `audit.py` Test-A/B + inline
+D1/WR.
+
+| arm | N | WR vs BT (final/peak) | punish avoidable% | forced% | loss% | autopsy missed-win% | Test-A place | Test-B hot-give | D1 safe | ρ̄ |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Ya(4) ref @6k | 4 | 94.4 / — | 1.64 | ~8.7 | — | 1.76 | 95.6% | 4.5% | 0.958 | — |
+| **Yb(3) champ @10k** | **4** | **95.1 / 96.2** | **0.95** | **8.19** | — | 1.45 | **97.7%** | **2.0%** | **0.976** | 0.750 |
+| Yc(1) | 6 | **94.7 / 95.6** | 1.84 | 7.99 | 9.84 | 3.26 | 95.5% | 3.1% | **0.984** | 0.754 |
+| Yc(2) | 8 | 94.4 / 95.3 | 2.27 | **7.00** | 9.27 | 2.84 | 94.9% | 5.1% | **0.984** | **0.773** |
+| Yc(3) | 12 | 93.6 / 94.6 | 3.90 | 8.18 | 12.08 | 4.40 | 92.5% | 6.9% | 0.941 | 0.740 |
+| Yc(4) | 16 | 93.4 / 94.5 | 2.94 | 8.90 | 11.83 | 5.23 | 92.1% | 6.8% | 0.975 | 0.760 |
+
+**Reading — the N axis is exhausted on the hot recipe too; nothing beats N=4.**
+
+1. **WR decreases monotonically with N** (94.7 → 93.4 vs BT). Even the best arm
+   (N=6) does not clear the N=4 champion's 10k WR (95.1%) and only ties Ya(4)'s 6k
+   N=4 point (94.4%) at the same budget.
+2. **N=6/8 tie for best-on-record D1** (`safe_piece_recall` 0.984, above the champ's
+   0.976 and well above Ya(4)'s 0.958) — the W-series D1-peak-at-large-N effect
+   reproduces, but here it saturates by N=6 rather than peaking sharply at N=8.
+   ρ̄ peaks at N=8 (0.773).
+3. **A place/give tax grows with N.** Test-A (winning-placement) falls 95.5% (N=6)
+   → 92.1% (N=16); autopsy missed-win rises 3.26% → 5.23%; punishing avoidable and
+   Test-B hot-give both worsen past N=8. **N≥12 is strictly dominated** — worse on
+   WR, Test-A, avoidable, *and* D1. The wider window dilutes the batch with
+   easy early-game rows and under-trains the endgame place/give decisions.
+4. **The forced floor does not move.** Best forced rate is N=8 at **7.00%** — a
+   marginal ~1pp below the champion's 8.19% (and Ya(4)'s ~8.7%), but still firmly in
+   the 7–9% band that has held since Ya. **No N buys down the forced floor**, exactly
+   as expected: the window controls *which* oracle-supervised transitions enter the
+   buffer, not the mid-game *placement* policy that walks into zugzwang.
+
+**Conclusion.** **N=4 stays the champion recipe.** N=6/8 buy a marginal D1 /
+forced-floor edge but at a place-head (Test-A / missed-win) and WR cost that grows
+with N; the trade is not worth re-crowning, and none of it dents the forced floor.
+The `N_LAST_STATES` axis is now exhausted on **both** the Ve recipe (series-W) and
+the hot recipe (Yc) — inverted-U, mild D1 gain at larger N, WR flat-to-worse. The
+open problem is unchanged: the **forced-exposure floor (~7–9%)** is the wall, and
+it is a *placement*-side problem → the Z-series (place-side planning) remains the
+frontier.

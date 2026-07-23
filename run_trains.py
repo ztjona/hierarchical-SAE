@@ -119,33 +119,46 @@ MULTI_PARAMS = None
 # (λ=1.0), Test-B hot-give 16%→4.5%, place intact, monotonic in λ. Block
 # recoverable from git.
 #
-# Yb_hotChamp — 10k champion-confirmation run on the Ya recipe (no code change;
-# only hyperparameters move, hence the second-letter bump Ya→Yb). 4 arms on the
-# proven λ_hot axis at zero marginal wall-clock (4 cores run in parallel, ~2.3d
-# either way):
-#   1) λ_hot=0.3  (SEED 5) — conservative bracket, best place preservation
-#   2) λ_hot=1.0  (SEED 5) — leading candidate
-#   3) λ_hot=1.0  (SEED 7) — seed-robustness of the leading candidate
-#   4) λ_hot=2.0  (SEED 5) — frontier extension: does more select pressure keep
-#                            paying, or tip into the X(3) place-corruption
-#                            regime? (watch Test-A — λ>1.0 is the danger zone)
-# Gate: punishing-opponent autopsy (avoidable ↓, missed-win ~1.3% intact) +
-# Test-B + inline D1/WR; confirm the λ=1.0 place-tax doesn't compound at 10k
-# before crowning. SEED is the new sweepable trainRL.py knob (was hardcoded).
-_YB_BASE = {
+# Yb_hotChamp — 10k λ_hot promotion [DONE 2026-06-16 — series-Y.md]. Crowned
+# Yb(3) λ_hot=1.0 seedB champion (avoidable 0.95%, place intact, λ=2.0 rejected).
+# Block recoverable from git.
+#
+# Yc_nStates — N_LAST_STATES sweep on the CHAMPION recipe (S4Hot, λ_hot=1.0,
+# λ_place_win=0.5, depth-2 minimax oracle always on, endgame anchor kept at
+# ENDGAME_FRACTION=0.5 / N_LAST_STATES_ENDGAME=2). Same code-version as Y (S4Hot),
+# only hyperparameters move → second-letter bump Yb→Yc. 6000-epoch screen; promote
+# the winning N to 10k. Goal: attack the FORCED floor (now ~90% of residual loss)
+# by training the place head on mid-game placement it currently never sees (N=4 is
+# deep-endgame-only). N counts whole moves (estimate_steps_per_match = 2N-1), so
+# N=16 ≈ the full game ("all positions"). Arms {6,8,12,16}; the N=4 control is
+# Ya_hotHead(4)0610_HOT_1.0 @6k (forced 8.72%) — same recipe/protocol, no re-run.
+#   1) N=6   — low-end resolution / cheap-win check just above the champion
+#   2) N=8   — W's D1 optimum; minimal-cost midgame injection
+#   3) N=12  — near-full; W's WR-tradeoff knee
+#   4) N=16  — full game / max midgame coverage
+# Prior (W, Ve recipe): N=8 is the D1 optimum & WR-tied, N≥12 strictly dominated
+# on WR (−1.3–1.5pp) & D1 — but W NEVER measured forced rate. So gate PRIMARILY on
+# the punishing-autopsy FORCED rate (+ raw forced count); guards: avoidable ≤~1%
+# (give wall stays closed), Test-A + missed-win (place intact), WR vs BT/random, D1.
+# A FLAT forced curve across N is itself decisive → the floor is a planning gap,
+# pivot to the forcing-danger aux head. Seed noise on forced ≈0.8pp (Yb seedA↔B);
+# if the cross-N spread is <~1pp, add a confirmation seed at the best N before any
+# promotion. Single SEED=5 across arms (matches the Ya control; isolates the N axis).
+_YC_BASE = {
     "ARCHITECTURE": "QuartoCNNAutoregUnifiedS4Hot",
     "USE_MINIMAX_SELECT_TARGET": True,
     "MINIMAX_SELECT_DEPTH": 2,
     "MINIMAX_DISABLE_AFTER_EPOCH": None,
-    "N_LAST_STATES_INIT": 4,
-    "EPOCHS": "10_000",
+    "LAMBDA_HOT": 1.0,
     "LAMBDA_PLACE_WIN": 0.5,
+    "SEED": 5,
+    "EPOCHS": "6_000",
 }
 MULTI_PARAMS = [
-    {**_YB_BASE, "LAMBDA_HOT": 0.3, "SEED": 5, "_label": "HOT_0.3"},
-    {**_YB_BASE, "LAMBDA_HOT": 1.0, "SEED": 5, "_label": "HOT_1.0"},
-    {**_YB_BASE, "LAMBDA_HOT": 1.0, "SEED": 7, "_label": "HOT_1.0_seedB"},
-    {**_YB_BASE, "LAMBDA_HOT": 2.0, "SEED": 5, "_label": "HOT_2.0"},
+    {**_YC_BASE, "N_LAST_STATES_INIT": 6,  "_label": "N_6"},
+    {**_YC_BASE, "N_LAST_STATES_INIT": 8,  "_label": "N_8"},
+    {**_YC_BASE, "N_LAST_STATES_INIT": 12, "_label": "N_12"},
+    {**_YC_BASE, "N_LAST_STATES_INIT": 16, "_label": "N_16"},
 ]
 
 # Path to the original training script

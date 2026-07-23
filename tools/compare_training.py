@@ -88,7 +88,8 @@ BASELINEs = [
     {"MA_tempRegresive": [2, 4]},
     {"ME_endgame": [0.5]},
     {"Ta_minimaxSelect": [2]},  # [2] matches DEPTH_2 → Ta(1)0514, the depth=2 champion candidate
-    {"Wa_oracleStates": [8]}
+    {"Wa_oracleStates": [8]},
+    {"Yb_hotChamp": [3]},
 ]
 # BASELINEs = []  # Disable baselines
 
@@ -431,10 +432,22 @@ def load_baseline_experiments(base_path, baselines):
                             param_name = auto_name
                             param_value = auto_value
 
-                    # Only include if parameter value matches one of the specified values
-                    if param_value is not None and numeric_value_matches(
+                    # Only include if parameter value matches one of the specified values.
+                    # If the extracted value is non-numeric (e.g. "HOT_1.0_seedB"), fall
+                    # back to matching by run index (N) in the folder name so that e.g.
+                    # {"Yb_hotChamp": [3]} picks up Yb_hotChamp(3)…
+                    matched = param_value is not None and numeric_value_matches(
                         param_value, param_values
-                    ):
+                    )
+                    if not matched and not isinstance(param_value, (int, float)):
+                        run_idx_m = re.search(r"\((\d+)\)", folder.name)
+                        if run_idx_m:
+                            run_idx = float(run_idx_m.group(1))
+                            if numeric_value_matches(run_idx, param_values):
+                                matched = True
+                                param_value = run_idx
+                                param_name = "run_i"
+                    if matched:
                         baseline_folders.append(
                             {
                                 "path": folder,
